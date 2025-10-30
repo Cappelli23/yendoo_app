@@ -9,7 +9,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>com.example.yendooApp</string>
+	<string>com.yendo.yendoo</string>
 	<key>PROJECT_ID</key>
 	<string>yendoo-app</string>
 	<key>STORAGE_BUCKET</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:427307624167:ios:8a6f28ef1b18b089cc6442</string>
+	<string>1:427307624167:ios:cea33b23e750ce0dcc6442</string>
 </dict>
 </plist>
