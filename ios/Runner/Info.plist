@@ -45,5 +45,13 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+
+	<!-- Descripciones de uso de la ubicación requeridas por Apple -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Yendoo utiliza tu ubicación cuando estás usando la app para mostrar tu posición en el mapa, calcular distancias y asignarte o mostrarte cadetes y locales cercanos durante los envíos.</string>
+
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Yendoo puede seguir usando tu ubicación mientras realizas un envío, incluso si cambias de app, para actualizar el mapa en tiempo real, calcular rutas y permitir que locales y cadetes vean el progreso de la entrega.</string>
+
 </dict>
 </plist>

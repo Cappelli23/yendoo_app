@@ -80,12 +80,19 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     if (perm == LocationPermission.deniedForever) return;
 
     final pos = await Geolocator.getCurrentPosition();
+    if (!mounted) return;
     setState(() => _currentPosition = LatLng(pos.latitude, pos.longitude));
 
-    _positionSubscription = Geolocator.getPositionStream().listen((p) {
-      FirebaseFirestore.instance.collection('usuarios').doc(cadete.uid).update({
-        'ubicacion': {'lat': p.latitude, 'lng': p.longitude}
-      });
+    _positionSubscription = Geolocator.getPositionStream().listen((p) async {
+      // actualizar ubicación del cadete en usuarios/{uid}
+      try {
+        await FirebaseFirestore.instance
+            .collection('usuarios')
+            .doc(cadete.uid)
+            .update({
+          'ubicacion': {'lat': p.latitude, 'lng': p.longitude}
+        });
+      } catch (_) {}
       if (mounted) {
         setState(() => _currentPosition = LatLng(p.latitude, p.longitude));
       }
@@ -119,7 +126,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
         } catch (_) {}
       }
 
-      // 🔒 FILTRO CLAVE:
+      // FILTRO:
       // - Mostrar PENDIENTES sin cadete
       // - Mostrar pedidos ASIGNADOS al cadete actual (aceptado/listo/entregado_al_cadete/entregado)
       final filtrados = snap.docs.where((doc) {
@@ -132,10 +139,11 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
           // Unassigned: campo vacío o no seteado
           return idCadete.isEmpty;
         }
-
-        // Para el resto de estados visibles, solo si es mío
+        // Resto de estados visibles: solo si son míos
         return esMio;
       }).toList();
+
+      if (!mounted) return;
 
       setState(() {
         _pedidos = filtrados;
@@ -153,7 +161,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
         }
       });
 
-      // cachear ubicaciones de locales (de lo filtrado)
+      // cachear ubicación de locales
       for (final ped in filtrados) {
         final d = ped.data();
         final idLocal = (d['idLocal'] ?? '').toString();
@@ -228,7 +236,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
       return;
     }
 
-    // ✅ Transacción: asignar solo si sigue libre y pendiente
+    // Transacción: asignar solo si sigue libre y pendiente
     final ref = FirebaseFirestore.instance
         .collection('pedidosEnCurso')
         .doc(_selectedPedidoId!);
@@ -265,12 +273,11 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
         });
       });
 
-      if (mounted) {
-        setState(() => _selectedPedidoId = null);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Pedido aceptado ✅')),
-        );
-      }
+      if (!mounted) return;
+      setState(() => _selectedPedidoId = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pedido aceptado ✅')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -382,11 +389,18 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     });
 
     await batch.commit();
+
+    if (!mounted) return;
+    setState(() => _selectedPedidoId = null);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Pedido entregado ✅')),
+    );
   }
 
   @override
   void dispose() {
     _positionSubscription?.cancel();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -407,7 +421,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     return esMio && localEntrego;
   }
 
-  // ========== NUEVO: Chip de pago para el cadete ==========
+  // Chip de pago para el cadete
   String _labelMetodo(String v) {
     switch (v) {
       case 'debito':
@@ -438,7 +452,6 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
 
   Widget _pagoChipParaCadete(BuildContext context, Map<String, dynamic> data,
       {bool soloSiEsDebito = false}) {
-    // Prioridad: campos planos -> objeto pago -> (opcional) pagoResumen
     String? metodo = data['pagoMetodo'] as String?;
     num? monto = data['pagoMonto'] as num?;
     String? via = data['pagoVia'] as String?;
@@ -448,15 +461,13 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     monto ??= pago?['monto'] as num?;
     via ??= pago?['via'] as String?;
 
-    // Si no hay datos suficientes, no mostramos nada
     if (metodo == null || monto == null) {
-      // fallback: si existe un string listo
       final resumen = data['pagoResumen'];
       if (resumen is String && resumen.trim().isNotEmpty) {
         final chipColor = Theme.of(context)
             .colorScheme
             .primaryContainer
-            .withValues(alpha: 0.35); // ✅ reemplazo de withOpacity
+            .withValues(alpha: 0.35);
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
@@ -500,8 +511,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     }
 
     final cs = Theme.of(context).colorScheme;
-    final chipColor =
-        cs.primaryContainer.withValues(alpha: 0.35); // ✅ reemplazo
+    final chipColor = cs.primaryContainer.withValues(alpha: 0.35);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -522,7 +532,6 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
       ),
     );
   }
-  // ========================================================
 
   @override
   Widget build(BuildContext context) {
@@ -702,7 +711,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
                                       .isNotEmpty)
                                     Text('Dirección: $_selectedDireccionLocal'),
 
-                                  // 🔹 Chip con el PAGO DEL CLIENTE (monto + método)
+                                  // Chip pago cliente
                                   const SizedBox(height: 6),
                                   _pagoChipParaCadete(context, d),
 
@@ -728,7 +737,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
                                   }),
                                   const SizedBox(height: 10),
 
-                                  // Acciones con Wrap (sin overflow)
+                                  // Acciones
                                   if (estado == 'pendiente' &&
                                       idCadete.isEmpty) ...[
                                     Wrap(

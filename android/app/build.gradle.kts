@@ -1,13 +1,14 @@
+// android/app/build.gradle.kts
 import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("kotlin-android")
-    id("dev.flutter.flutter-gradle-plugin") // Flutter debe ir al final
+    id("org.jetbrains.kotlin.android")              // ✅ plugin correcto en Kotlin DSL
+    id("dev.flutter.flutter-gradle-plugin")         // Flutter al final
     id("com.google.gms.google-services")
 }
 
-// 🔐 Carga del archivo key.properties
+// 🔐 Keystore (si usás firma propia además de Play App Signing)
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
@@ -17,14 +18,18 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.yendoo_app"
     compileSdk = 35
-    ndkVersion = "27.0.12077973" // ✅ Versión correcta
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
-        applicationId = "com.yendoo_app" // ✅ Coincide con Firebase
+        applicationId = "com.yendoo_app"           // ⚠️ no cambiar
         minSdk = 24
         targetSdk = 35
-        versionCode = 102
-        versionName = "1.0.3"
+
+        // ⬆️ Subí la versión para la actualización
+        versionCode = 103                           // ← mayor que 102
+        versionName = "1.0.4"
+
+        multiDexEnabled = true
     }
 
     signingConfigs {
@@ -45,18 +50,31 @@ android {
             isMinifyEnabled = false
             isShrinkResources = false
         }
+        debug {
+            // nada especial
+        }
     }
 
+    // ✅ Java 17 + DESUGARING (requerido por flutter_local_notifications modernas)
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true        // ← clave para evitar el error de AAR metadata
     }
 
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // ✅ Necesario por isCoreLibraryDesugaringEnabled
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.3")
+
+    // (opcional) si llegás a 64K métodos
+    implementation("androidx.multidex:multidex:2.0.1")
 }
