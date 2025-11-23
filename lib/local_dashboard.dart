@@ -8,7 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'screens/local/historial_pedidos_screen.dart';
 import 'screens/local/mis_pedidos_screen.dart';
 import 'screens/local/ver_cadetes_screen.dart';
-import 'login_screen.dart'; // Asegurate que este import esté correcto
+import 'login_screen.dart';
 
 class LocalDashboard extends StatefulWidget {
   const LocalDashboard({super.key});
@@ -21,6 +21,7 @@ class _LocalDashboardState extends State<LocalDashboard> {
   LatLng? _currentPosition;
   bool _buttonsVisible = true;
   late final MapController _mapController;
+  bool _locationError = false;
 
   @override
   void initState() {
@@ -31,30 +32,42 @@ class _LocalDashboardState extends State<LocalDashboard> {
   }
 
   Future<void> _initLocation() async {
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      await Geolocator.openLocationSettings();
-      return;
-    }
-
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) return;
-    }
-
-    Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 5,
-      ),
-    ).listen((Position position) {
-      if (mounted) {
-        setState(() {
-          _currentPosition = LatLng(position.latitude, position.longitude);
-        });
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() => _locationError = true);
+        return;
       }
-    });
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() => _locationError = true);
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() => _locationError = true);
+        return;
+      }
+
+      Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.best,
+          distanceFilter: 5,
+        ),
+      ).listen((Position position) {
+        if (mounted) {
+          setState(() {
+            _currentPosition = LatLng(position.latitude, position.longitude);
+          });
+        }
+      });
+    } catch (e) {
+      setState(() => _locationError = true);
+    }
   }
 
   Future<void> _borrarFavoritosAlIniciar() async {
@@ -144,72 +157,89 @@ class _LocalDashboardState extends State<LocalDashboard> {
     final screenWidth = MediaQuery.of(context).size.width;
     final buttonMaxWidth = screenWidth * 0.85;
 
+    // ❗Mensaje si la ubicación está desactivada / permisos negados
+    if (_locationError) {
+      return const Scaffold(
+        body: Center(
+          child: Text(
+            "Para usar Yendo debes activar la ubicación",
+            style: TextStyle(fontSize: 18),
+          ),
+        ),
+      );
+    }
+
+    // ❗Mientras esperamos ubicación (NO renderizamos mapa aún)
+    if (_currentPosition == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    // ✔ Mapa seguro
     return Scaffold(
-      body: _currentPosition == null
-          ? const Center(child: CircularProgressIndicator())
-          : Stack(
-              children: [
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: _currentPosition!,
-                    initialZoom: 16,
-                    keepAlive: true,
+      body: Stack(
+        children: [
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: _currentPosition!,
+              initialZoom: 16,
+            ),
+            children: [
+              TileLayer(
+                urlTemplate:
+                    'https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=jKh3fbz0oFEuYjlFsboz',
+                userAgentPackageName: 'com.yendo.yendoo_app',
+              ),
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _currentPosition!,
+                    width: 40,
+                    height: 40,
+                    child: const Icon(Icons.location_on,
+                        color: Colors.blue, size: 40),
                   ),
+                ],
+              ),
+            ],
+          ),
+          if (_buttonsVisible)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(217),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 12,
+                  runSpacing: 12,
                   children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=jKh3fbz0oFEuYjlFsboz',
-                      userAgentPackageName: 'com.yendo.yendoo_app',
-                    ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: _currentPosition!,
-                          width: 40,
-                          height: 40,
-                          child: const Icon(Icons.location_on,
-                              color: Colors.blue, size: 40),
-                        ),
-                      ],
-                    ),
+                    _actionButton("Generar pedido", Icons.add_location,
+                        "generar", buttonMaxWidth),
+                    _actionButton("Personalizar", Icons.edit_location_alt,
+                        "personalizar", buttonMaxWidth),
+                    _actionButton("Ver cadetes", Icons.people_alt, "verCadetes",
+                        buttonMaxWidth),
+                    _actionButton("Mis pedidos", Icons.list_alt, "misPedidos",
+                        buttonMaxWidth),
+                    _actionButton("Historial", Icons.history, "historial",
+                        buttonMaxWidth),
+                    _logoutButton("Cerrar sesión", Icons.logout, "logout",
+                        buttonMaxWidth),
                   ],
                 ),
-                if (_buttonsVisible)
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withAlpha(217),
-                        borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(20)),
-                      ),
-                      child: Wrap(
-                        alignment: WrapAlignment.center,
-                        spacing: 12,
-                        runSpacing: 12,
-                        children: [
-                          _actionButton("Generar pedido", Icons.add_location,
-                              "generar", buttonMaxWidth),
-                          _actionButton("Personalizar", Icons.edit_location_alt,
-                              "personalizar", buttonMaxWidth),
-                          _actionButton("Ver cadetes", Icons.people_alt,
-                              "verCadetes", buttonMaxWidth),
-                          _actionButton("Mis pedidos", Icons.list_alt,
-                              "misPedidos", buttonMaxWidth),
-                          _actionButton("Historial", Icons.history, "historial",
-                              buttonMaxWidth),
-                          _logoutButton("Cerrar sesión", Icons.logout, "logout",
-                              buttonMaxWidth),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
+        ],
+      ),
     );
   }
 
