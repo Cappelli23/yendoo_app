@@ -1,8 +1,8 @@
-# Uncomment this line to define a global platform for your project
+# Plataforma mínima para tu app
 platform :ios, '15.0'
 
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
-disable_input_output_paths = true
+# Desactivar estadísticas de CocoaPods
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
   'Debug' => :debug,
@@ -10,19 +10,39 @@ project 'Runner', {
   'Release' => :release,
 }
 
-def flutter_install_ios_plugin_pods(ios_application_path = nil)
-  # ...
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(
+    File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__
+  )
+
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "Generated.xcconfig must exist. Run `flutter pub get` first."
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+
+  raise "FLUTTER_ROOT not found in Generated.xcconfig"
 end
+
+require File.expand_path(
+  File.join('packages', 'flutter_tools', 'bin', 'podhelper.rb'),
+  flutter_root
+)
 
 target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
-
 end
 
 post_install do |installer|
+  flutter_post_install(installer)
+
+  # Esto es para evitar problemas con simulador arm64
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
