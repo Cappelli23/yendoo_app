@@ -26,14 +26,15 @@ class DefaultFirebaseOptions {
     }
   }
 
-  // ANDROID (tu app)
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyD2cPjNGLH4DimHAlt8bKRfPXSoSoJSnbc',
+    apiKey: 'AIzaSyC0lzC8rYyiFACEyRxVOwARBnqQZNo9YM8',
     appId: '1:427307624167:android:6049b34fa57925aecc6442',
     messagingSenderId: '427307624167',
     projectId: 'yendoo-app',
     storageBucket: 'yendoo-app.firebasestorage.app',
   );
+
+  // ANDROID (tu app)
 
   // WEB (la misma key)
   static const FirebaseOptions web = FirebaseOptions(
@@ -47,7 +48,7 @@ class DefaultFirebaseOptions {
   // iOS (lo dejamos apuntando al mismo proyecto)
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyD2cPjNGLH4DimHAlt8bKRfPXSoSoJSnbc',
-    appId: '1:427307624167:ios:0000000000000000000000',
+    appId: '1:427307624167:ios:cea33b23e750ce0dcc6442',
     messagingSenderId: '427307624167',
     projectId: 'yendoo-app',
     storageBucket: 'yendoo-app.firebasestorage.app',

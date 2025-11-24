@@ -5,6 +5,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// 👇 IMPORTANTE: tu archivo de opciones de Firebase
+import 'firebase_options.dart';
+
 // Screens
 import 'login_screen.dart';
 import 'local_dashboard.dart';
@@ -19,7 +22,11 @@ import 'screens/local/personalizar_pedido_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+
+  // ✅ ACÁ ESTABA LA CLAVE: usar las opciones por plataforma
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
 
   // ✅ En Web, aseguramos persistencia local (mantiene la sesión tras recargar)
   if (kIsWeb) {
@@ -41,7 +48,6 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      // Usamos un gate que observa el authState y redirige solo
       home: const _RootGate(),
       routes: {
         '/login': (context) => const LoginScreen(),
@@ -60,9 +66,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-/// Observa el estado de autenticación y decide adónde ir.
-/// Si no hay sesión → Login.
-/// Si hay sesión → lee el rol en Firestore y envía al dashboard correcto.
 class _RootGate extends StatelessWidget {
   const _RootGate();
 
@@ -77,12 +80,10 @@ class _RootGate extends StatelessWidget {
           );
         }
 
-        // 🔴 No logueado
         if (!authSnap.hasData) {
           return const LoginScreen();
         }
 
-        // 🟢 Logueado: resolvemos rol
         final uid = authSnap.data!.uid;
         return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           future:
@@ -95,7 +96,6 @@ class _RootGate extends StatelessWidget {
             }
 
             if (!userSnap.hasData || !userSnap.data!.exists) {
-              // Si no existe el doc, mandamos a login (o podrías crear el doc aquí)
               return const LoginScreen();
             }
 
@@ -110,7 +110,6 @@ class _RootGate extends StatelessWidget {
               case 'admin':
                 return const AdminDashboardScreen();
               default:
-                // Rol desconocido → volver a login
                 return const LoginScreen();
             }
           },
