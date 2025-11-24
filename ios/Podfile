@@ -1,4 +1,4 @@
-# Plataforma mínima para tu app
+# Plataforma mínima para iOS (requerida por cloud_firestore, firebase_auth, etc.)
 platform :ios, '15.0'
 
 # Desactivar estadísticas de CocoaPods
@@ -40,9 +40,12 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  flutter_post_install(installer)
+  # Llamamos a la función de Flutter SOLO si existe, así evitamos el error
+  if defined?(flutter_post_install)
+    flutter_post_install(installer)
+  end
 
-  # Esto es para evitar problemas con simulador arm64
+  # Evitar problemas con simulador arm64
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
