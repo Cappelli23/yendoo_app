@@ -24,13 +24,13 @@ def flutter_root
     return matches[1].strip if matches
   end
 
-  raise "FLUTTER_ROOT not found in Generated.xcconfig"
+  raise "FLUTTER_ROOT not found in Generated.xcconfig. Try deleting Generated.xcconfig, then run `flutter pub get`."
 end
 
-require File.expand_path(
-  File.join('packages', 'flutter_tools', 'bin', 'podhelper.rb'),
-  flutter_root
-)
+require File.expand_path('packages/flutter_tools/bin/podhelper.rb', flutter_root)
+
+# 👇 ESTA LÍNEA ES LA QUE FALTABA ANTES
+flutter_ios_podfile_setup
 
 target 'Runner' do
   use_frameworks!
@@ -40,10 +40,7 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  # Llamamos a la función de Flutter SOLO si existe, así evitamos el error
-  if defined?(flutter_post_install)
-    flutter_post_install(installer)
-  end
+  flutter_post_install(installer)
 
   # Evitar problemas con simulador arm64
   installer.pods_project.targets.each do |target|
