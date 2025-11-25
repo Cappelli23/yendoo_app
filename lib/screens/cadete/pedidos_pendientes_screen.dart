@@ -5,10 +5,10 @@ import 'package:latlong2/latlong.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:collection/collection.dart';
 import 'package:intl/intl.dart';
+import 'package:yendoo_app/services/sound_service.dart';
 
 class PedidosPendientesScreen extends StatefulWidget {
   const PedidosPendientesScreen({super.key});
@@ -20,7 +20,6 @@ class PedidosPendientesScreen extends StatefulWidget {
 
 class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
   final MapController mapController = MapController();
-  final AudioPlayer _audioPlayer = AudioPlayer();
 
   LatLng? _currentPosition;
 
@@ -120,10 +119,8 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
       }).toList();
 
       if (nuevosPendientes.isNotEmpty) {
-        try {
-          await _audioPlayer.stop();
-          await _audioPlayer.play(AssetSource('sonidos/notificacion.mp3'));
-        } catch (_) {}
+        // 🔊 usamos el servicio centralizado
+        await SoundService.playNotification();
       }
 
       // FILTRO:
@@ -400,7 +397,6 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
   @override
   void dispose() {
     _positionSubscription?.cancel();
-    _audioPlayer.dispose();
     super.dispose();
   }
 

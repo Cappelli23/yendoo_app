@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:yendoo_app/services/sound_service.dart';
 
 class PedidosPersonalizadosScreen extends StatefulWidget {
   const PedidosPersonalizadosScreen({super.key});
@@ -38,8 +38,8 @@ class _PedidosPersonalizadosScreenState
   // ✅ Tipado del stream
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _sub;
 
-  final AudioPlayer _player = AudioPlayer();
-  String? _ultimoIdVisto;
+  // Para sonido de nuevos pedidos
+  List<String> _ultimosIds = [];
 
   @override
   void initState() {
@@ -62,8 +62,9 @@ class _PedidosPersonalizadosScreenState
         await FirebaseFirestore.instance.collection('usuarios').doc(uid).get();
     final data = doc.data();
     if (data != null && data['ubicacion'] != null && mounted) {
-      setState(() =>
-          _miPos = LatLng(data['ubicacion']['lat'], data['ubicacion']['lng']));
+      setState(() => _miPos = LatLng(
+          (data['ubicacion']['lat'] as num).toDouble(),
+          (data['ubicacion']['lng'] as num).toDouble()));
     }
   }
 
@@ -108,18 +109,17 @@ class _PedidosPersonalizadosScreenState
       }).toList();
 
       // 🔔 Sonido sólo para nuevos pendientes libres
-      final hayNuevoLibre = docs.any((d) {
-        final isNew = d.id != _ultimoIdVisto;
+      final nuevosPendientes = docs.where((d) {
+        final isNew = !_ultimosIds.contains(d.id);
         final data = d.data();
         final estado = (data['estado'] ?? '').toString();
         final idCadete = (data['idCadete'] ?? '').toString();
         return isNew && estado == 'pendiente' && idCadete.isEmpty;
-      });
-      if (hayNuevoLibre) {
-        _ultimoIdVisto = docs.first.id;
+      }).toList();
+
+      if (nuevosPendientes.isNotEmpty) {
         try {
-          await _player.stop();
-          await _player.play(AssetSource('sonidos/notificacion.mp3'));
+          await SoundService.playNotification();
         } catch (_) {}
       }
 
@@ -136,12 +136,18 @@ class _PedidosPersonalizadosScreenState
             .get();
         final ldata = ldoc.data();
         if (ldata != null && ldata['ubicacion'] != null) {
-          _ubicacionesLocales[id] =
-              LatLng(ldata['ubicacion']['lat'], ldata['ubicacion']['lng']);
+          _ubicacionesLocales[id] = LatLng(
+            (ldata['ubicacion']['lat'] as num).toDouble(),
+            (ldata['ubicacion']['lng'] as num).toDouble(),
+          );
         }
       }
 
-      if (mounted) setState(() => _pedidos = docs);
+      if (!mounted) return;
+      setState(() {
+        _pedidos = docs;
+        _ultimosIds = snap.docs.map((e) => e.id).toList();
+      });
     });
   }
 
@@ -154,7 +160,14 @@ class _PedidosPersonalizadosScreenState
       return;
     }
 
-    final localPos = _ubicacionesLocales[_selLocalId]!;
+    final localPos = _ubicacionesLocales[_selLocalId];
+    if (localPos == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No se pudo obtener la ubicación del local.')));
+      return;
+    }
+
     final distancia = _distKm(localPos, _selDestino!);
     final montoCadete = _precioDesdeDist(distancia);
 
@@ -242,7 +255,30 @@ class _PedidosPersonalizadosScreenState
     final cadete = FirebaseAuth.instance.currentUser;
     if (cadete == null) return;
 
-    final km = _distKm(_ubicacionesLocales[_selLocalId]!, _selDestino!);
+    // Asegurarse de tener ubicación del local
+    LatLng? localPos = _ubicacionesLocales[_selLocalId];
+    if (localPos == null) {
+      final docLoc = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(_selLocalId)
+          .get();
+      final ldata = docLoc.data();
+      if (ldata != null && ldata['ubicacion'] != null) {
+        localPos = LatLng(
+          (ldata['ubicacion']['lat'] as num).toDouble(),
+          (ldata['ubicacion']['lng'] as num).toDouble(),
+        );
+        _ubicacionesLocales[_selLocalId!] = localPos;
+      }
+    }
+    if (localPos == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No se pudo obtener la ubicación del local.')));
+      return;
+    }
+
+    final km = _distKm(localPos, _selDestino!);
     final precioLocal = _cobroLocalDesdeDist(km);
     final precioCadete = _precioDesdeDist(km);
     final now = Timestamp.now();
@@ -360,19 +396,35 @@ class _PedidosPersonalizadosScreenState
                           point: e.value,
                           width: 36,
                           height: 36,
-                          child: Image.asset('assets/icono_local.png',
-                              errorBuilder: (_, __, ___) =>
-                                  const Icon(Icons.store)),
+                          child: Image.asset(
+                            'assets/icono_local.png',
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.store),
+                          ),
                         ))
                     .toList(),
               ),
               MarkerLayer(
                 markers: _pedidos.map((p) {
-                  final data = p.data(); // ✅ sin cast
-                  final destino = LatLng(data['ubicacionDestino']['lat'],
-                      data['ubicacionDestino']['lng']);
-                  final estado = data['estado'];
-                  final esMio = data['idCadete'] == _uid;
+                  final data = p.data();
+                  final uDest = data['ubicacionDestino'];
+                  if (uDest == null ||
+                      uDest['lat'] == null ||
+                      uDest['lng'] == null) {
+                    return const Marker(
+                      point: LatLng(0, 0),
+                      width: 0,
+                      height: 0,
+                      child: SizedBox.shrink(),
+                    );
+                  }
+
+                  final destino = LatLng(
+                    (uDest['lat'] as num).toDouble(),
+                    (uDest['lng'] as num).toDouble(),
+                  );
+                  final estado = (data['estado'] ?? '').toString();
+                  final esMio = (data['idCadete'] ?? '') == _uid;
 
                   return Marker(
                     point: destino,
@@ -380,22 +432,53 @@ class _PedidosPersonalizadosScreenState
                     height: 40,
                     child: GestureDetector(
                       onTap: () async {
-                        final localPos = _ubicacionesLocales[data['idLocal']]!;
-                        final dist = _distKm(localPos, destino);
-                        final docLoc = await FirebaseFirestore.instance
-                            .collection('usuarios')
-                            .doc(data['idLocal'])
-                            .get();
-                        final direccionLoc = docLoc.data()?['direccion'] ?? '';
-                        final nombreLoc = docLoc.data()?['nombre'] ?? '';
-                        final telefonoCliente = data['telefonoCliente'] ?? '';
+                        final localId = data['idLocal']?.toString() ?? '';
+                        LatLng? localPos = _ubicacionesLocales[localId];
+
+                        if (localPos == null && localId.isNotEmpty) {
+                          final docLoc = await FirebaseFirestore.instance
+                              .collection('usuarios')
+                              .doc(localId)
+                              .get();
+                          final ldata = docLoc.data();
+                          if (ldata != null && ldata['ubicacion'] != null) {
+                            localPos = LatLng(
+                              (ldata['ubicacion']['lat'] as num).toDouble(),
+                              (ldata['ubicacion']['lng'] as num).toDouble(),
+                            );
+                            _ubicacionesLocales[localId] = localPos;
+                          }
+                        }
+
+                        double? dist;
+                        if (localPos != null) {
+                          dist = _distKm(localPos, destino);
+                        }
+
+                        String direccionLoc = '';
+                        String nombreLoc = '';
+                        if (localId.isNotEmpty) {
+                          final docLoc = await FirebaseFirestore.instance
+                              .collection('usuarios')
+                              .doc(localId)
+                              .get();
+                          direccionLoc =
+                              (docLoc.data()?['direccion'] ?? '').toString();
+                          nombreLoc =
+                              (docLoc.data()?['nombre'] ?? '').toString();
+                        }
+
+                        final telefonoCliente =
+                            (data['telefonoCliente'] ?? '').toString();
+
                         if (!mounted) return;
                         setState(() {
                           _selId = p.id;
                           _selDestino = destino;
-                          _selCliente = data['cliente'] ?? '';
-                          _selMontoCadete = _precioDesdeDist(dist);
-                          _selLocalId = data['idLocal'];
+                          _selCliente = (data['cliente'] ?? '').toString();
+                          _selMontoCadete =
+                              dist != null ? _precioDesdeDist(dist) : null;
+                          _selLocalId = localId;
                           _selEstado = estado;
                           _selDireccionLocal = direccionLoc;
                           _selNombreLocal = nombreLoc;
@@ -427,6 +510,7 @@ class _PedidosPersonalizadosScreenState
                 color: Colors.white,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (_selNombreLocal != null)
                       Text('Local: $_selNombreLocal'),
@@ -436,11 +520,14 @@ class _PedidosPersonalizadosScreenState
                       Text('Dirección: $_selDireccionLocal'),
                     if (_selMontoCadete != null)
                       Text(
-                          'Pago al cadete: \$${_selMontoCadete!.toStringAsFixed(0)}'),
+                        'Pago al cadete: \$${_selMontoCadete!.toStringAsFixed(0)}',
+                      ),
                     if (_selEstado == 'aceptado' &&
                         _selTelefonoCliente != null &&
                         _selTelefonoCliente!.isNotEmpty)
-                      SelectableText('Teléfono cliente: $_selTelefonoCliente'),
+                      SelectableText(
+                        'Teléfono cliente: $_selTelefonoCliente',
+                      ),
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
