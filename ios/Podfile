@@ -29,7 +29,7 @@ end
 
 require File.expand_path('packages/flutter_tools/bin/podhelper.rb', flutter_root)
 
-# 👇 ESTA LÍNEA ES LA QUE FALTABA ANTES
+# Configuración recomendada por Flutter para iOS
 flutter_ios_podfile_setup
 
 target 'Runner' do
@@ -40,7 +40,9 @@ target 'Runner' do
 end
 
 post_install do |installer|
-  flutter_post_install(installer)
+  # 🔹 Esta línea ahora solo se ejecuta si el método existe,
+  # evitando el error "undefined method `flutter_post_install`"
+  flutter_post_install(installer) if defined?(flutter_post_install)
 
   # Evitar problemas con simulador arm64
   installer.pods_project.targets.each do |target|
