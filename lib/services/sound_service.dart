@@ -1,21 +1,15 @@
-import 'package:audioplayers/audioplayers.dart';
-import 'package:flutter/foundation.dart';
+// Servicio de sonido temporal SIN audioplayers para que la app no crashee en iOS.
+// De momento solo dejamos métodos estáticos vacíos para que el resto del código compile.
 
 class SoundService {
-  // Un solo player reutilizable
-  static final AudioPlayer _player = AudioPlayer()
-    ..setReleaseMode(ReleaseMode.stop);
+  // Si en algún lado usás inicialización, no va a hacer nada.
+  static Future<void> init() async {
+    // No-op
+  }
 
+  // Llamada estática para reproducir sonido de notificación.
+  // Antes usaba audioplayers, ahora queda vacío para no romper iOS.
   static Future<void> playNotification() async {
-    try {
-      // Por las dudas, detenemos lo anterior
-      await _player.stop();
-      // Asegurate de que la ruta coincida con pubspec.yaml
-      await _player.play(
-        AssetSource('sonidos/notificacion.mp3'),
-      );
-    } catch (e) {
-      debugPrint('Error reproduciendo sonido de notificación: $e');
-    }
+    // No-op por ahora
   }
 }
