@@ -2,7 +2,7 @@ name: yendoo_app
 description: Aplicación Yendo desde cero
 publish_to: 'none'
 
-version: 1.0.4+9
+version: 1.0.5+10  # ⬅ NUEVA VERSIÓN
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -24,10 +24,10 @@ dependencies:
   flutter_map: ^8.1.1
   geolocator: ^14.0.2
   latlong2: ^0.9.0
-  intl: ^0.20.2           # 👈 para formatear fechas
+  intl: ^0.20.2
 
-  # SONIDO
-  audioplayers: ^6.5.1   # 👈 versión nueva para iOS
+  # SONIDO (desactivado por ahora, rompe en iOS)
+  # audioplayers: ^6.5.1
 
   # Para AndroidX
   cupertino_icons: ^1.0.6
@@ -36,18 +36,17 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.13.1   # 👈 generador de íconos del launcher
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
   assets:
     - assets/logo.png
     - assets/icono_local.png
-    - assets/sonidos/notificacion.mp3   # 👈 agregado correctamente
+    - assets/sonidos/notificacion.mp3
 
-# 👇 Configuración del icono del launcher (Android)
 flutter_launcher_icons:
   android: true
   ios: true
   min_sdk_android: 24
-  image_path: assets/yendo_icon_1024_bg.png   # 👈 tu PNG 1024×1024
+  image_path: assets/yendo_icon_1024_bg.png
