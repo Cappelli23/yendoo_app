@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 class ListosParaRetiroScreen extends StatelessWidget {
   const ListosParaRetiroScreen({super.key});
@@ -473,21 +472,23 @@ class ListosParaRetiroScreen extends StatelessWidget {
                                   label: const Text('Entregar'),
                                 ),
 
-                                // Llamar al cliente
+                                // Llamar al cliente (TEMPORALMENTE DESACTIVADO)
                                 if (cliTel.isNotEmpty)
                                   FilledButton.tonalIcon(
-                                    onPressed: () async {
-                                      final tel =
-                                          cliTel.replaceAll(RegExp(r'\D'), '');
-                                      final uri = Uri.parse('tel:$tel');
-                                      if (await canLaunchUrl(uri)) {
-                                        await launchUrl(uri,
-                                            mode:
-                                                LaunchMode.externalApplication);
-                                      }
+                                    onPressed: () {
+                                      final messenger =
+                                          ScaffoldMessenger.of(context);
+                                      messenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Llamada desactivada temporalmente. Tel: $cliTel',
+                                          ),
+                                        ),
+                                      );
                                     },
                                     icon: const Icon(Icons.phone),
-                                    label: const Text('Llamar al cliente'),
+                                    label:
+                                        const Text('Llamar al cliente (off)'),
                                   ),
                               ],
                             ),

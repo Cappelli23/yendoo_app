@@ -1,3 +1,4 @@
+// lib/screens/cadete/pedidos_pendientes_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -5,7 +6,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:url_launcher/url_launcher.dart';
+// import 'package:url_launcher/url_launcher.dart'; // desactivado temporalmente
 import 'package:collection/collection.dart';
 import 'package:intl/intl.dart';
 import 'package:yendoo_app/services/sound_service.dart';
@@ -669,22 +670,24 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
                               final puedeEntregar =
                                   _puedeEntregar(d, cadete?.uid);
 
+                              /// Botón de llamar **sin** url_launcher
                               Widget buildCallBtn() {
                                 if (!esMio || telefono.isEmpty) {
                                   return const SizedBox.shrink();
                                 }
-                                final telFmt =
-                                    telefono.replaceAll(RegExp(r'\D'), '');
-                                final uri = Uri.parse('tel:$telFmt');
                                 return SizedBox(
                                   height: 44,
                                   child: ElevatedButton.icon(
-                                    onPressed: () async {
-                                      if (await canLaunchUrl(uri)) {
-                                        await launchUrl(uri,
-                                            mode:
-                                                LaunchMode.externalApplication);
-                                      }
+                                    onPressed: () {
+                                      final messenger =
+                                          ScaffoldMessenger.of(context);
+                                      messenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Llamada desactivada temporalmente. Tel: $telefono',
+                                          ),
+                                        ),
+                                      );
                                     },
                                     icon: const Icon(Icons.phone,
                                         color: Colors.blue),
