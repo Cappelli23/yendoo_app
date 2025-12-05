@@ -1,0 +1,29 @@
+workflows:
+  yendoo-release:
+    name: Yendoo Release Build
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      xcode: latest
+      vars:
+        BUNDLE_ID: "com.yendo.yendoo"
+        APP_NAME: "Yendoo"
+
+    scripts:
+      - name: Flutter pub get
+        script: flutter pub get
+
+      - name: Build iOS release
+        script: flutter build ipa --release --no-codesign
+
+      - name: Build Android release
+        script: flutter build apk --release
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/app/outputs/flutter-apk/app-release.apk
+
+    publishing:
+      email:
+        recipients:
+          - "luisilva17lccs@gmail.com"
