@@ -10,6 +10,6 @@ workflows:
       - name: Get Flutter packages
         script: flutter pub get
       - name: Build iOS IPA
-        script: flutter build ipa --release -t lib/main_prod.dart
+        script: flutter build ipa --release -t lib/main.dart
     artifacts:
       - build/ios/ipa/*.ipa
