@@ -2,14 +2,28 @@ workflows:
   ios-release:
     name: iOS Release
     max_build_duration: 60
+
+    integrations:
+      app_store_connect: codemagic
+
     environment:
       flutter: stable
       xcode: latest
       cocoapods: default
+
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.yendo.yendoo
+
     scripts:
       - name: Get Flutter packages
         script: flutter pub get
+
+      - name: Set up code signing
+        script: xcode-project use-profiles
+
       - name: Build iOS IPA
         script: flutter build ipa --release -t lib/main.dart
+
     artifacts:
       - build/ios/ipa/*.ipa
