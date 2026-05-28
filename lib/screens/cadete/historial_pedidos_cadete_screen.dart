@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -16,12 +16,24 @@ class HistorialPedidosCadeteScreen extends StatefulWidget {
 class _HistorialPedidosCadeteScreenState
     extends State<HistorialPedidosCadeteScreen> {
   String? _uid;
-  late final Stream<QuerySnapshot<Map<String, dynamic>>> _stream;
+
+  // ✅ Mejor: nullable para no depender de late final
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _stream;
+
+  double _toDouble(dynamic v) {
+    if (v == null) return 0.0;
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
 
   @override
   void initState() {
     super.initState();
     _uid = widget.cadeteUid ?? FirebaseAuth.instance.currentUser?.uid;
+
     if (_uid != null) {
       _stream = FirebaseFirestore.instance
           .collection('usuarios')
@@ -35,7 +47,7 @@ class _HistorialPedidosCadeteScreenState
 
   @override
   Widget build(BuildContext context) {
-    if (_uid == null) {
+    if (_uid == null || _stream == null) {
       return const Scaffold(
         body: Center(child: Text('Error: usuario no autenticado')),
       );
@@ -51,7 +63,7 @@ class _HistorialPedidosCadeteScreenState
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Aún no se registran entregas.'));
+            return const Center(child: Text('No se registran entregas.'));
           }
 
           final docs = snapshot.data!.docs;
@@ -59,10 +71,12 @@ class _HistorialPedidosCadeteScreenState
           // Agrupar por día
           final Map<String, List<QueryDocumentSnapshot<Map<String, dynamic>>>>
               entregasPorDia = {};
-          for (var doc in docs) {
+
+          for (final doc in docs) {
             final data = doc.data();
             final fecha = (data['fecha'] as Timestamp?)?.toDate();
             if (fecha == null) continue;
+
             final dia = DateFormat('yyyy-MM-dd').format(fecha);
             entregasPorDia.putIfAbsent(dia, () => []).add(doc);
           }
@@ -80,10 +94,24 @@ class _HistorialPedidosCadeteScreenState
               final widgetsPedidos = entregas.map((doc) {
                 final data = doc.data();
                 final fecha = (data['fecha'] as Timestamp?)?.toDate();
-                final cliente = data['cliente'] ?? 'Cliente';
-                final localNombre = data['localNombre'] ?? 'Local';
-                final distancia = (data['distancia'] ?? 0).toDouble();
-                final monto = (data['montoCadete'] ?? 0).toDouble();
+
+                final cliente = (data['cliente'] ?? 'Cliente').toString();
+                final localNombre = (data['localNombre'] ?? 'Local').toString();
+
+                // ✅ SOLO MOSTRAR LO GUARDADO (NO recalcular)
+                final distanciaMostrable =
+                    _toDouble(data['distanciaKmMostrable']);
+                final distanciaVieja = _toDouble(data['distancia']);
+
+                final distanciaParaMostrar = distanciaMostrable > 0
+                    ? distanciaMostrable
+                    : distanciaVieja;
+
+                // ✅ “Tarifa” SOLO si existe guardada (si no existe, NO inventar)
+                final kmTarifaGuardada = _toDouble(data['kmTarifaCadete']);
+
+                // ✅ monto guardado (esto es lo que el cadete ganó)
+                final monto = _toDouble(data['montoCadete']);
                 totalDia += monto;
 
                 return ListTile(
@@ -93,7 +121,14 @@ class _HistorialPedidosCadeteScreenState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Local: $localNombre'),
-                      Text('Distancia: ${distancia.toStringAsFixed(1)} km'),
+                      Text(
+                        'Distancia: ${distanciaParaMostrar.toStringAsFixed(1)} km',
+                      ),
+                      if (kmTarifaGuardada > 0)
+                        Text(
+                          'Tarifa: ${kmTarifaGuardada.toStringAsFixed(1)} km',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       if (fecha != null)
                         Text('Hora: ${DateFormat('HH:mm').format(fecha)}'),
                     ],
@@ -107,7 +142,7 @@ class _HistorialPedidosCadeteScreenState
 
               return ExpansionTile(
                 title: Text(
-                  '📅 $fechaFormateada – Total: \$${totalDia.toStringAsFixed(0)} – Entregas: ${entregas.length}',
+                  '📅 $fechaFormateada - Total: \$${totalDia.toStringAsFixed(0)} - Entregas: ${entregas.length}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 children: widgetsPedidos,

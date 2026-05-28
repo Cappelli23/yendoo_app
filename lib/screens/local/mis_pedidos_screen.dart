@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -56,13 +56,13 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
   // -------- Helpers de pago --------
   String _labelMetodo(String v) {
     switch (v) {
-      case 'debito':
+      case 'débito':
         return 'débito';
       case 'efectivo':
         return 'efectivo';
       case 'transferencia':
         return 'transferencia';
-      case 'credito':
+      case 'crédito':
         return 'crédito';
       case 'qr':
         return 'QR';
@@ -119,7 +119,7 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
     final viaTxt = _labelVia(via);
     final metodoTxt = _labelMetodo(metodo);
     final texto = viaTxt.isNotEmpty
-        ? '${f.format(monto)} ($metodoTxt · $viaTxt)'
+        ? '${f.format(monto)} ($metodoTxt Â· $viaTxt)'
         : '${f.format(monto)} ($metodoTxt)';
 
     IconData icono() {
@@ -201,7 +201,7 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
                   : data['fechaCreado'];
 
               final fechaTexto = fechaTimestamp is Timestamp
-                  ? DateFormat('dd/MM – HH:mm').format(fechaTimestamp.toDate())
+                  ? DateFormat('dd/MM “ HH:mm').format(fechaTimestamp.toDate())
                   : 'Fecha no disponible';
 
               final cliente = (data['cliente'] ?? 'Cliente').toString();
@@ -258,7 +258,7 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
                             Text('Fecha: $fechaTexto'),
                             Text('Total: \$${montoTotal.toStringAsFixed(0)}'),
 
-                            // 🔹 CHIP de PAGO: "$X (método)" ej. "$200,00 (débito)"
+                            // ðŸ”¹ CHIP de PAGO: "$X (mÃ©todo)" ej. "$200,00 (dÃ©bito)"
                             const SizedBox(height: 6),
                             _pagoChip(data),
 
@@ -277,7 +277,7 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
 
                       const SizedBox(height: 6),
 
-                      // Acciones según estado
+                      // Acciones segÃºn estado
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -353,7 +353,7 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
                               child: const Text('Marcar listo'),
                             ),
 
-                          // ENTREGAR AL CADETE (cuando está LISTO)
+                          // ENTREGAR AL CADETE (cuando estÃ¡ LISTO)
                           if (estado == 'listo')
                             FilledButton.tonal(
                               onPressed: () async {

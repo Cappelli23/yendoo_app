@@ -1,10 +1,10 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 
 class PedidosCadeteRepository {
   PedidosCadeteRepository(this._db);
   final FirebaseFirestore _db;
 
-  /// Pedidos del local en estado LISTO y sin cadete (o asignados a mí).
+  /// Pedidos del local en estado LISTO y sin cadete (o asignados a mÃ­).
   Stream<QuerySnapshot<Map<String, dynamic>>> listosParaRetiro({
     required String localId,
     required String cadeteUid,
@@ -21,7 +21,7 @@ class PedidosCadeteRepository {
         .snapshots();
   }
 
-  /// Tomar y marcar como RETIRADO (transacción para evitar carreras).
+  /// Tomar y marcar como RETIRADO (transacciÃ³n para evitar carreras).
   Future<void> tomarYRetirar({
     required DocumentReference<Map<String, dynamic>> ref,
     required String cadeteUid,
@@ -35,10 +35,10 @@ class PedidosCadeteRepository {
       final cadeteId = cur['cadeteId'];
 
       if (estado != 'listo') {
-        throw 'El pedido aún no está listo para retirar.';
+        throw 'El pedido aÃºn no estÃ¡ listo para retirar.';
       }
       if (cadeteId != null && cadeteId != cadeteUid) {
-        throw 'Otro cadete ya tomó este pedido.';
+        throw 'Otro cadete ya tomÃ³ este pedido.';
       }
 
       tx.update(ref, {
@@ -50,7 +50,7 @@ class PedidosCadeteRepository {
     });
   }
 
-  /// ENTREGADO AL CLIENTE (solo si el local habilitó cadetePuedeEntregar = true).
+  /// ENTREGADO AL CLIENTE (solo si el local habilitÃ³ cadetePuedeEntregar = true).
   Future<void> marcarEntregadoPorCadete({
     required DocumentReference<Map<String, dynamic>> ref,
   }) async {
@@ -62,7 +62,7 @@ class PedidosCadeteRepository {
       final puede = (cur['cadetePuedeEntregar'] == true);
 
       if (!puede) {
-        throw 'Aún no habilitado por el local. Esperá a que el local te entregue el pedido.';
+        throw 'AÃºn no habilitado por el local. EsperÃ¡ a que el local te entregue el pedido.';
       }
 
       tx.update(ref, {
@@ -72,3 +72,4 @@ class PedidosCadeteRepository {
     });
   }
 }
+

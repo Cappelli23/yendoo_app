@@ -1,7 +1,8 @@
-// lib/screens/cadete/listos_para_retiro_screen.dart
+﻿// lib/screens/cadete/listos_para_retiro_screen.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:latlong2/latlong.dart';
 
 class ListosParaRetiroScreen extends StatelessWidget {
@@ -32,7 +33,7 @@ class ListosParaRetiroScreen extends StatelessWidget {
       case 'listo':
         return Colors.teal;
       case 'entregado_al_cadete':
-        return Colors.teal; // mismo color que "listo"
+        return Colors.teal;
       case 'entregado':
         return Colors.green;
       case 'rechazado':
@@ -43,11 +44,16 @@ class ListosParaRetiroScreen extends StatelessWidget {
   }
 
   Map<String, double> _calcularPrecios(double km) {
-    if (km <= 3.0) return {'local': 80, 'cadete': 75};
-    if (km <= 4.5) return {'local': 100, 'cadete': 95};
-    if (km <= 6.0) return {'local': 150, 'cadete': 145};
-    if (km <= 8.5) return {'local': 200, 'cadete': 195};
-    return {'local': 0, 'cadete': 0};
+    if (km <= 1.0) return {'local': 70, 'cadete': 65};
+    if (km <= 2.0) return {'local': 90, 'cadete': 85};
+    if (km <= 3.0) return {'local': 110, 'cadete': 105};
+    if (km <= 4.0) return {'local': 130, 'cadete': 125};
+    if (km <= 5.0) return {'local': 150, 'cadete': 145};
+    if (km <= 6.0) return {'local': 170, 'cadete': 165};
+    if (km <= 7.0) return {'local': 190, 'cadete': 185};
+    if (km <= 8.0) return {'local': 210, 'cadete': 205};
+    if (km <= 8.5) return {'local': 230, 'cadete': 225};
+    return {'local': 230, 'cadete': 225};
   }
 
   // Mueve a historial + borra de pedidosEnCurso (igual que en la pantalla del mapa)
@@ -60,7 +66,7 @@ class ListosParaRetiroScreen extends StatelessWidget {
     final cadete = FirebaseAuth.instance.currentUser;
     if (cadete == null) return;
 
-    // ✅ Revalidar estado en servidor por si quedó desactualizado
+    // Ã¢Å“â€¦ Revalidar estado en servidor por si quedÃƒÂ³ desactualizado
     final refEnCurso =
         FirebaseFirestore.instance.collection('pedidosEnCurso').doc(docId);
     final snapLatest = await refEnCurso.get();
@@ -179,7 +185,7 @@ class ListosParaRetiroScreen extends StatelessWidget {
     await batch.commit();
 
     messenger.showSnackBar(
-      const SnackBar(content: Text('Pedido entregado ✅')),
+      const SnackBar(content: Text('Pedido entregado')),
     );
   }
 
@@ -199,7 +205,7 @@ class ListosParaRetiroScreen extends StatelessWidget {
       );
     }
 
-    // Se muestran aceptados, listo y entregado_al_cadete; pero solo se puede ENTREGAR cuando esté entregado_al_cadete
+    // Se muestran aceptados, listo y entregado_al_cadete; pero solo se puede ENTREGAR cuando estÃƒÂ© entregado_al_cadete
     final stream = FirebaseFirestore.instance
         .collection('pedidosEnCurso')
         .where('estado', whereIn: ['aceptado', 'listo', 'entregado_al_cadete'])
@@ -394,7 +400,7 @@ class ListosParaRetiroScreen extends StatelessWidget {
                                   final String nombre =
                                       (m['nombre'] ?? '').toString();
                                   final String emoji =
-                                      (m['emoji'] ?? '🛒').toString();
+                                      (m['emoji'] ?? 'Ã°Å¸â€ºâ€™').toString();
                                   final int cant =
                                       _asInt(m['cantidad'], def: 1);
                                   return Chip(
@@ -410,7 +416,7 @@ class ListosParaRetiroScreen extends StatelessWidget {
                               spacing: 8,
                               runSpacing: 8,
                               children: [
-                                // ✅ Entregar SOLO si el local ya lo marcó como ENTREGADO_AL_CADETE
+                                // Ã¢Å“â€¦ Entregar SOLO si el local ya lo marcÃƒÂ³ como ENTREGADO_AL_CADETE
                                 FilledButton.icon(
                                   onPressed: (!puedeEntregar ||
                                           dLat == null ||
@@ -439,7 +445,7 @@ class ListosParaRetiroScreen extends StatelessWidget {
                                                     const SizedBox(height: 10),
                                                   ],
                                                   const Text(
-                                                      '¿Confirmás que entregaste el pedido al cliente?'),
+                                                      '¿Confirmas que entregaste el pedido al cliente?'),
                                                 ],
                                               ),
                                               actions: [
@@ -453,8 +459,7 @@ class ListosParaRetiroScreen extends StatelessWidget {
                                                   onPressed: () =>
                                                       Navigator.pop(
                                                           context, true),
-                                                  child:
-                                                      const Text('✔ Entregar'),
+                                                  child: const Text('Entregar'),
                                                 ),
                                               ],
                                             ),
@@ -475,20 +480,17 @@ class ListosParaRetiroScreen extends StatelessWidget {
                                 // Llamar al cliente (TEMPORALMENTE DESACTIVADO)
                                 if (cliTel.isNotEmpty)
                                   FilledButton.tonalIcon(
-                                    onPressed: () {
-                                      final messenger =
-                                          ScaffoldMessenger.of(context);
-                                      messenger.showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Llamada desactivada temporalmente. Tel: $cliTel',
-                                          ),
-                                        ),
-                                      );
+                                    onPressed: () async {
+                                      final telFmt =
+                                          cliTel.replaceAll(RegExp(r'\D'), '');
+                                      if (telFmt.isEmpty) return;
+                                      final uri =
+                                          Uri(scheme: 'tel', path: telFmt);
+                                      await launchUrl(uri,
+                                          mode: LaunchMode.externalApplication);
                                     },
                                     icon: const Icon(Icons.phone),
-                                    label:
-                                        const Text('Llamar al cliente (off)'),
+                                    label: const Text('Llamar al cliente'),
                                   ),
                               ],
                             ),

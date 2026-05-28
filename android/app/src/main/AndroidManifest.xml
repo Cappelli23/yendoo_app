@@ -8,8 +8,11 @@
     <!-- (Opcional) Si usás ubicación en segundo plano en Android 10+ -->
     <!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" /> -->
 
-    <!-- (Opcional) Si tu app necesita red (mapas, Firebase, etc.) -->
-    <!-- <uses-permission android:name="android.permission.INTERNET" /> -->
+    <!-- ✅ Internet (MapTiler, Firebase, expandir links maps.app.goo.gl) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- ✅ Android 13+ (API 33): permiso para notificaciones -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name="${applicationName}"

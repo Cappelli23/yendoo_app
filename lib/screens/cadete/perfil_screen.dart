@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -30,7 +30,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
         await FirebaseFirestore.instance.collection('usuarios').doc(uid).get();
     final data = doc.data();
 
-    if (!mounted) return; // 👈 Check antes de setState
+    if (!mounted) return; // ðŸ‘ˆ Check antes de setState
 
     if (data != null) {
       setState(() {
@@ -52,7 +52,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
         .doc(uid)
         .update({'mostrarNumero': valor});
 
-    if (!mounted) return; // 👈 Check antes de usar context
+    if (!mounted) return; // ðŸ‘ˆ Check antes de usar context
 
     setState(() {
       mostrarNumero = valor;

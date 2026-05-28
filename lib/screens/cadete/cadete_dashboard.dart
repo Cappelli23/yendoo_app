@@ -1,9 +1,13 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as maplibre;
+
 import 'package:yendoo_app/services/ubicacion_cadete.dart';
+
+// ✅ Push notifications
+import 'package:yendoo_app/services/push_notification_service.dart';
 
 // ✅ Importar las pantallas del cadete
 import 'package:yendoo_app/screens/cadete/perfil_screen.dart';
@@ -24,19 +28,31 @@ class CadeteDashboardScreen extends StatefulWidget {
 class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
   LatLng? _miUbicacion;
   bool _locationError = false;
-  final MapController _mapController = MapController();
+
   final _ubicacionService = UbicacionCadeteService();
+
+  maplibre.MapLibreMapController? _mapLibreController;
+  bool _mapStyleLoaded = false;
+
+  final List<maplibre.Symbol> _symbols = [];
+
+  static const String _mapStyle =
+      'https://api.maptiler.com/maps/openstreetmap/style.json?key=jKh3fbz0oFEuYjlFsboz';
 
   @override
   void initState() {
     super.initState();
     _obtenerUbicacionCadete();
-    _ubicacionService.start(); // 👈 acá adentro seguro usás Geolocator
+    _ubicacionService.start();
+
+    // ✅ IMPORTANTE: asegurar token + topic aunque el cadete siga logueado
+    PushNotificationService.instance.registerCadeteActive();
   }
 
   Future<void> _obtenerUbicacionCadete() async {
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
+
       if (uid == null) return;
 
       final doc = await FirebaseFirestore.instance
@@ -50,6 +66,7 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
       }
 
       final data = doc.data();
+
       if (data == null || !data.containsKey('ubicacion')) {
         setState(() => _locationError = true);
         return;
@@ -57,7 +74,6 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
 
       final geo = data['ubicacion'];
 
-      // Puede venir como Map o GeoPoint, lo manejamos defensivo
       double? lat;
       double? lng;
 
@@ -72,19 +88,53 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
       }
 
       if (!mounted) return;
+
       setState(() {
         _miUbicacion = LatLng(lat!, lng!);
       });
+
+      await _dibujarMarkers();
     } catch (e) {
-      // Cualquier error al leer ubicacion del cadete
       if (mounted) {
         setState(() => _locationError = true);
       }
     }
   }
 
+  Future<void> _dibujarMarkers() async {
+    final map = _mapLibreController;
+
+    if (!_mapStyleLoaded || map == null || _miUbicacion == null) {
+      return;
+    }
+
+    for (final s in List<maplibre.Symbol>.from(_symbols)) {
+      try {
+        await map.removeSymbol(s);
+      } catch (_) {}
+    }
+
+    _symbols.clear();
+
+    // 🛵 marker cadete
+    final cadeteMarker = await map.addSymbol(
+      maplibre.SymbolOptions(
+        geometry: maplibre.LatLng(
+          _miUbicacion!.latitude,
+          _miUbicacion!.longitude,
+        ),
+        textField: '🛵',
+        textSize: 30,
+        textAnchor: 'center',
+      ),
+    );
+
+    _symbols.add(cadeteMarker);
+  }
+
   void _cerrarSesion(BuildContext context) async {
     final user = FirebaseAuth.instance.currentUser;
+
     if (user != null) {
       await FirebaseFirestore.instance
           .collection('usuarios')
@@ -93,12 +143,19 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
     }
 
     _ubicacionService.stop();
+
+    // ✅ Sacar del topic de cadetes activos al cerrar sesión
+    await PushNotificationService.instance.unregisterCadeteActive();
+
     await FirebaseAuth.instance.signOut();
 
     if (context.mounted) {
       Navigator.of(context).pushReplacementNamed('/login');
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sesión cerrada con éxito')),
+        const SnackBar(
+          content: Text('Sesión cerrada con éxito'),
+        ),
       );
     }
   }
@@ -126,7 +183,10 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
       style: ElevatedButton.styleFrom(
         backgroundColor: color ?? Colors.blueAccent,
         foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 14,
+        ),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -137,7 +197,6 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
   @override
   void dispose() {
     _ubicacionService.stop();
-    _mapController.dispose();
     super.dispose();
   }
 
@@ -145,14 +204,17 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
   Widget build(BuildContext context) {
     final cadete = FirebaseAuth.instance.currentUser;
 
-    // ❗ Si hubo problema con la ubicación desde Firestore
     if (_locationError) {
       return Scaffold(
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: const [
-              Icon(Icons.location_off, size: 48, color: Colors.redAccent),
+              Icon(
+                Icons.location_off,
+                size: 48,
+                color: Colors.redAccent,
+              ),
               SizedBox(height: 12),
               Text(
                 'No se pudo obtener la ubicación del cadete.\nVerifica tu perfil y vuelve a intentar.',
@@ -164,30 +226,39 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
       );
     }
 
-    // ❗ Mientras todavía no cargamos la ubicación inicial
     if (_miUbicacion == null) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
       );
     }
 
     return Scaffold(
       body: Stack(
         children: [
-          // 🌍 Mapa
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _miUbicacion!,
-              initialZoom: 15,
-            ),
-            children: [
-              TileLayer(
-                urlTemplate:
-                    'https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=jKh3fbz0oFEuYjlFsboz',
-                userAgentPackageName: 'com.yendo.yendoo_app',
+          // 🌍 Mapa vectorial
+          maplibre.MapLibreMap(
+            styleString: _mapStyle,
+            initialCameraPosition: maplibre.CameraPosition(
+              target: maplibre.LatLng(
+                _miUbicacion!.latitude,
+                _miUbicacion!.longitude,
               ),
-            ],
+              zoom: 15,
+            ),
+            minMaxZoomPreference: const maplibre.MinMaxZoomPreference(
+              13,
+              17,
+            ),
+            myLocationEnabled: false,
+            onMapCreated: (controller) {
+              _mapLibreController = controller;
+            },
+            onStyleLoadedCallback: () async {
+              _mapStyleLoaded = true;
+              await _dibujarMarkers();
+            },
           ),
 
           // 🧭 Botones
@@ -198,12 +269,19 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _botonFlotante(Icons.account_circle, 'Perfil', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const PerfilScreen()),
-                      );
-                    }),
+                    _botonFlotante(
+                      Icons.account_circle,
+                      'Perfil',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const PerfilScreen(),
+                          ),
+                        );
+                      },
+                    ),
+
                     const SizedBox(height: 16),
 
                     // ✅ Botón: Listos para retirar con contador (N)
@@ -212,9 +290,11 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
                         stream: _listosCountStream(cadete.uid),
                         builder: (context, snap) {
                           final n = snap.data ?? 0;
+
                           final label = n > 0
                               ? 'Listos para retirar ($n)'
                               : 'Listos para retirar';
+
                           return _botonFlotante(
                             Icons.shopping_bag,
                             label,
@@ -230,37 +310,63 @@ class _CadeteDashboardScreenState extends State<CadeteDashboardScreen> {
                           );
                         },
                       ),
+
                     if (cadete != null) const SizedBox(height: 16),
 
-                    _botonFlotante(Icons.list, 'Pedidos pendientes', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const PedidosPendientesScreen()),
-                      );
-                    }),
+                    _botonFlotante(
+                      Icons.list,
+                      'Pedidos pendientes',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const PedidosPendientesScreen(),
+                          ),
+                        );
+                      },
+                    ),
+
                     const SizedBox(height: 16),
-                    _botonFlotante(Icons.star, 'Pedidos personalizados', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) =>
-                                const PedidosPersonalizadosScreen()),
-                      );
-                    }),
+
+                    _botonFlotante(
+                      Icons.star,
+                      'Pedidos personalizados',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const PedidosPersonalizadosScreen(),
+                          ),
+                        );
+                      },
+                    ),
+
                     const SizedBox(height: 16),
-                    _botonFlotante(Icons.history, 'Historial', () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
+
+                    _botonFlotante(
+                      Icons.history,
+                      'Historial',
+                      () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
                             builder: (_) =>
-                                const HistorialPedidosCadeteScreen()),
-                      );
-                    }),
+                                const HistorialPedidosCadeteScreen(),
+                          ),
+                        );
+                      },
+                    ),
+
                     const SizedBox(height: 32),
-                    _botonFlotante(Icons.logout, 'Cerrar sesión', () {
-                      _cerrarSesion(context);
-                    }, color: Colors.red),
+
+                    _botonFlotante(
+                      Icons.logout,
+                      'Cerrar sesión',
+                      () {
+                        _cerrarSesion(context);
+                      },
+                      color: Colors.red,
+                    ),
                   ],
                 ),
               ),

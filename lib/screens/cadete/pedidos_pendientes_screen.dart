@@ -1,15 +1,17 @@
-// lib/screens/cadete/pedidos_pendientes_screen.dart
+﻿// lib/screens/cadete/pedidos_pendientes_screen.dart
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:io';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:geolocator/geolocator.dart';
-// import 'package:url_launcher/url_launcher.dart'; // desactivado temporalmente
 import 'package:collection/collection.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
-import 'package:yendoo_app/services/sound_service.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as maplibre;
+import 'package:url_launcher/url_launcher.dart';
 
 class PedidosPendientesScreen extends StatefulWidget {
   const PedidosPendientesScreen({super.key});
@@ -20,7 +22,15 @@ class PedidosPendientesScreen extends StatefulWidget {
 }
 
 class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
-  final MapController mapController = MapController();
+  maplibre.MapLibreMapController? _mapLibreController;
+  bool _mapStyleLoaded = false;
+
+  final Map<maplibre.Circle, QueryDocumentSnapshot<Map<String, dynamic>>>
+      _circlePedidos = {};
+  final List<maplibre.Circle> _circles = [];
+  final List<maplibre.Symbol> _symbols = [];
+
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   LatLng? _currentPosition;
 
@@ -31,14 +41,29 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
   String? _selectedLocalId;
   String? _selectedNombreLocal;
   String? _selectedDireccionLocal;
+  String? _selectedTelefonoLocal;
+
+  // para colorear en amarillo los pedidos pendientes del mismo local que ya tengo activo
+  String? _miLocalActivoId;
 
   // datos en memoria
   List<QueryDocumentSnapshot<Map<String, dynamic>>> _pedidos = [];
   final Map<String, LatLng> _ubicacionesLocales = {};
+  final Map<String, String> _telefonosLocales = {};
   StreamSubscription<Position>? _positionSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _pedidosSubscription;
+
+  // ✅ refresca el mapa cada minuto para que los pedidos pasen a violeta aunque Firestore no cambie
+  Timer? _timerColores;
 
   // para sonido de nuevos pendientes
   List<String> _ultimosIds = [];
+
+  // ✅ anti doble tap entrega
+  bool _entregando = false;
+
+  static const String _mapStyle =
+      'https://api.maptiler.com/maps/openstreetmap/style.json?key=jKh3fbz0oFEuYjlFsboz';
 
   static const _estadosVisibles = <String>[
     'pendiente',
@@ -48,15 +73,81 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     'entregado_al_cadete',
   ];
 
+  // ✅ estados que cuentan como "tengo pedidos activos"
+  static const _estadosActivos = <String>[
+    'aceptado',
+    'listo',
+    'entregado_al_cadete',
+  ];
+
+  // ✅ Pedido demorado: se usa para pintar en violeta los pendientes con +20 minutos
+  DateTime? _fechaPedidoDesdeData(Map<String, dynamic> d) {
+    final fecha =
+        d['fechaCreado'] ?? d['fechaCreacion'] ?? d['createdAt'] ?? d['fecha'];
+
+    if (fecha is Timestamp) return fecha.toDate();
+    if (fecha is DateTime) return fecha;
+
+    return null;
+  }
+
+  bool _pedidoPendienteDemorado20Min(Map<String, dynamic> d) {
+    final estado = (d['estado'] ?? '').toString();
+    final idCadete = (d['idCadete'] ?? '').toString();
+
+    if (estado != 'pendiente' || idCadete.isNotEmpty) return false;
+
+    final fechaPedido = _fechaPedidoDesdeData(d);
+    if (fechaPedido == null) return false;
+
+    return DateTime.now().difference(fechaPedido).inMinutes >= 15;
+  }
+
+  // ✅ Regla única: total = cadete + 5
+  static const int _gananciaYendo = 5;
+
+  // ✅ Zooms fijos del mapa: 11, 13, 15 y 17
+  Future<void> _irAZoom(double zoom) async {
+    await _mapLibreController?.animateCamera(
+      maplibre.CameraUpdate.zoomTo(zoom),
+    );
+  }
+
   double _kmEntre(LatLng a, LatLng b) =>
       const Distance().as(LengthUnit.Kilometer, a, b);
 
-  Map<String, double> _calcularPrecios(double km) {
-    if (km <= 3.0) return {'local': 80, 'cadete': 75};
-    if (km <= 4.5) return {'local': 100, 'cadete': 95};
-    if (km <= 6.0) return {'local': 150, 'cadete': 145};
-    if (km <= 8.5) return {'local': 200, 'cadete': 195};
-    return {'local': 0, 'cadete': 0};
+  // ✅ EXACTITUD mostrable/guardable: 1 decimal
+  double _to1Decimal(double km) => double.parse(km.toStringAsFixed(1));
+
+  // ✅ fuerza 1 decimal y tipo double (evita que te quede int en Firestore)
+  double _as1DecimalDouble(dynamic v, {double def = 0}) {
+    final d = _toDouble(v);
+    if (d == null) return def;
+    return _to1Decimal(d);
+  }
+
+  double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
+  }
+
+  int? _toInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
+  }
+
+  num? _toNum(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v;
+    if (v is String) return num.tryParse(v);
+    return null;
   }
 
   @override
@@ -64,6 +155,15 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     super.initState();
     _iniciarUbicacionEnTiempoReal();
     _escucharPedidos();
+
+    // ✅ Importante: Firestore no vuelve a emitir solo porque pasa el tiempo.
+    // Esto fuerza a redibujar el mapa cada minuto para recalcular el color violeta.
+    _timerColores = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) {
+        setState(() {});
+        unawaited(_dibujarMarkersMapLibre());
+      }
+    });
   }
 
   Future<void> _iniciarUbicacionEnTiempoReal() async {
@@ -82,25 +182,47 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     final pos = await Geolocator.getCurrentPosition();
     if (!mounted) return;
     setState(() => _currentPosition = LatLng(pos.latitude, pos.longitude));
+    unawaited(_dibujarMarkersMapLibre());
 
     _positionSubscription = Geolocator.getPositionStream().listen((p) async {
-      // actualizar ubicación del cadete en usuarios/{uid}
-      try {
-        await FirebaseFirestore.instance
-            .collection('usuarios')
-            .doc(cadete.uid)
-            .update({
-          'ubicacion': {'lat': p.latitude, 'lng': p.longitude}
-        });
-      } catch (_) {}
-      if (mounted) {
-        setState(() => _currentPosition = LatLng(p.latitude, p.longitude));
-      }
+      await FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(cadete.uid)
+          .update({
+        'ubicacion': {
+          'lat': p.latitude,
+          'lng': p.longitude,
+        }
+      });
+
+      if (!mounted) return;
+
+      final nuevaPos = LatLng(
+        p.latitude,
+        p.longitude,
+      );
+
+      setState(() {
+        _currentPosition = nuevaPos;
+      });
+
+      // ✅ La cámara sigue al cadete para que siempre vea su propia moto.
+      await _mapLibreController?.animateCamera(
+        maplibre.CameraUpdate.newLatLng(
+          maplibre.LatLng(
+            p.latitude,
+            p.longitude,
+          ),
+        ),
+      );
+
+      // ✅ Redibuja la 🛵 del cadete, locales y pedidos.
+      await _dibujarMarkersMapLibre();
     });
   }
 
   void _escucharPedidos() {
-    FirebaseFirestore.instance
+    _pedidosSubscription = FirebaseFirestore.instance
         .collection('pedidosEnCurso')
         .where('estado', whereIn: _estadosVisibles)
         .where('tipo', isEqualTo: 'normal')
@@ -120,13 +242,33 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
       }).toList();
 
       if (nuevosPendientes.isNotEmpty) {
-        // 🔊 usamos el servicio centralizado
-        await SoundService.playNotification();
+        try {
+          await _audioPlayer.stop();
+          await _audioPlayer.play(AssetSource('sonidos/notificacion.mp3'));
+        } catch (_) {}
+      }
+
+      // Determinar "mi local activo" para amarillo:
+      String? miLocal;
+      for (final doc in snap.docs) {
+        final d = doc.data();
+        final estado = (d['estado'] ?? '').toString();
+        final idCadete = (d['idCadete'] ?? '').toString();
+        if (idCadete == uid &&
+            (estado == 'aceptado' ||
+                estado == 'listo' ||
+                estado == 'entregado_al_cadete')) {
+          final idLocal = (d['idLocal'] ?? '').toString();
+          if (idLocal.isNotEmpty) {
+            miLocal = idLocal;
+            break;
+          }
+        }
       }
 
       // FILTRO:
       // - Mostrar PENDIENTES sin cadete
-      // - Mostrar pedidos ASIGNADOS al cadete actual (aceptado/listo/entregado_al_cadete/entregado)
+      // - Mostrar pedidos ASIGNADOS al cadete actual
       final filtrados = snap.docs.where((doc) {
         final d = doc.data();
         final estado = (d['estado'] ?? '').toString();
@@ -134,18 +276,43 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
         final esMio = idCadete == uid;
 
         if (estado == 'pendiente') {
-          // Unassigned: campo vacío o no seteado
           return idCadete.isEmpty;
         }
-        // Resto de estados visibles: solo si son míos
         return esMio;
       }).toList();
 
-      if (!mounted) return;
+      // cachear ubicaciones de locales (de lo filtrado)
+      for (final ped in filtrados) {
+        final d = ped.data();
+        final idLocal = (d['idLocal'] ?? '').toString();
+        if (idLocal.isEmpty) continue;
+
+        if (!_ubicacionesLocales.containsKey(idLocal)) {
+          final docLoc = await FirebaseFirestore.instance
+              .collection('usuarios')
+              .doc(idLocal)
+              .get();
+
+          final locData = docLoc.data();
+          final u = locData?['ubicacion'];
+          if (u is Map && u['lat'] != null && u['lng'] != null) {
+            _ubicacionesLocales[idLocal] = LatLng(
+              (u['lat'] as num).toDouble(),
+              (u['lng'] as num).toDouble(),
+            );
+          }
+
+          final telLocal = (locData?['telefono'] ?? '').toString();
+          if (telLocal.trim().isNotEmpty) {
+            _telefonosLocales[idLocal] = telLocal.trim();
+          }
+        }
+      }
 
       setState(() {
         _pedidos = filtrados;
         _ultimosIds = snap.docs.map((e) => e.id).toList();
+        _miLocalActivoId = miLocal;
 
         // Si el seleccionado ya no está en la lista filtrada, cerramos panel
         if (_selectedPedidoId != null &&
@@ -156,249 +323,12 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
           _selectedLocalId = null;
           _selectedNombreLocal = null;
           _selectedDireccionLocal = null;
+          _selectedTelefonoLocal = null;
         }
       });
 
-      // cachear ubicación de locales
-      for (final ped in filtrados) {
-        final d = ped.data();
-        final idLocal = (d['idLocal'] ?? '').toString();
-        if (idLocal.isEmpty) continue;
-        if (!_ubicacionesLocales.containsKey(idLocal)) {
-          final docLoc = await FirebaseFirestore.instance
-              .collection('usuarios')
-              .doc(idLocal)
-              .get();
-          final u = docLoc.data()?['ubicacion'];
-          if (u is Map && u['lat'] != null && u['lng'] != null) {
-            _ubicacionesLocales[idLocal] = LatLng(
-                (u['lat'] as num).toDouble(), (u['lng'] as num).toDouble());
-          }
-        }
-      }
+      unawaited(_dibujarMarkersMapLibre());
     });
-  }
-
-  Future<void> _aceptarPedido() async {
-    if (_selectedPedidoId == null || _selectedLocalId == null) return;
-
-    final cadete = FirebaseAuth.instance.currentUser;
-    if (cadete == null) return;
-
-    // origen local para estimaciones
-    double? distancia;
-    double? montoCadete;
-    final origenLocal = _ubicacionesLocales[_selectedLocalId!];
-    if (origenLocal != null && _selectedDestino != null) {
-      distancia = _kmEntre(origenLocal, _selectedDestino!);
-      final precios = _calcularPrecios(distancia);
-      montoCadete = precios['cadete'];
-    }
-
-    // Distancia máxima cadete-local
-    if (_currentPosition != null && origenLocal != null) {
-      final distanciaCadeteLocal = _kmEntre(_currentPosition!, origenLocal);
-      if (distanciaCadeteLocal > 8.5) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('El local está demasiado lejos (más de 8.5 km)')),
-        );
-        return;
-      }
-    }
-
-    // Limitar activos del cadete (aceptado o entregado_al_cadete)
-    final activos = await FirebaseFirestore.instance
-        .collection('pedidosEnCurso')
-        .where('idCadete', isEqualTo: cadete.uid)
-        .where('estado', whereIn: ['aceptado', 'entregado_al_cadete']).get();
-
-    final mismos =
-        activos.docs.where((d) => d['idLocal'] == _selectedLocalId).length;
-    final otrosLocales = activos.docs.map((d) => d['idLocal']).toSet();
-
-    if (otrosLocales.isNotEmpty && !otrosLocales.contains(_selectedLocalId)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'No puedes aceptar pedidos de otro local hasta terminar los actuales.'),
-      ));
-      return;
-    }
-    if (mismos >= 3) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Ya aceptaste 3 pedidos de este local.')),
-      );
-      return;
-    }
-
-    // Transacción: asignar solo si sigue libre y pendiente
-    final ref = FirebaseFirestore.instance
-        .collection('pedidosEnCurso')
-        .doc(_selectedPedidoId!);
-
-    try {
-      await FirebaseFirestore.instance.runTransaction((txn) async {
-        final snap = await txn.get(ref);
-        if (!snap.exists) {
-          throw Exception('El pedido ya no existe.');
-        }
-        final data = snap.data() as Map<String, dynamic>;
-
-        final estado = (data['estado'] ?? '').toString();
-        final idCadeteActual = (data['idCadete'] ?? '').toString();
-
-        if (estado != 'pendiente' || idCadeteActual.isNotEmpty) {
-          // ya lo tomó otro
-          throw Exception('El pedido ya fue aceptado por otro cadete.');
-        }
-
-        final telefonoCliente = (data['telefonoCliente'] ?? '').toString();
-
-        txn.update(ref, {
-          'estado': 'aceptado',
-          'idCadete': cadete.uid,
-          'fechaAceptado': FieldValue.serverTimestamp(),
-          'asignado': {
-            'cadeteId': cadete.uid,
-            'cadeteNombre': cadete.displayName ?? 'Cadete',
-          },
-          if (distancia != null) 'distancia_km': distancia,
-          if (montoCadete != null) 'montoCadete': montoCadete,
-          if (telefonoCliente.isNotEmpty) 'telefonoCliente': telefonoCliente,
-        });
-      });
-
-      if (!mounted) return;
-      setState(() => _selectedPedidoId = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pedido aceptado ✅')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
-    }
-  }
-
-  Future<void> _entregarPedido(
-    String idPedido,
-    String uidLocal,
-    LatLng destino,
-  ) async {
-    final cadete = FirebaseAuth.instance.currentUser;
-    if (cadete == null) return;
-
-    // origen local
-    LatLng? origenLocal = _ubicacionesLocales[uidLocal];
-    if (origenLocal == null) {
-      final docLoc = await FirebaseFirestore.instance
-          .collection('usuarios')
-          .doc(uidLocal)
-          .get();
-      final u = docLoc.data()?['ubicacion'];
-      if (u is Map && u['lat'] != null && u['lng'] != null) {
-        origenLocal =
-            LatLng((u['lat'] as num).toDouble(), (u['lng'] as num).toDouble());
-        _ubicacionesLocales[uidLocal] = origenLocal;
-      }
-    }
-    if (origenLocal == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('No se pudo obtener la ubicación del local.')),
-      );
-      return;
-    }
-
-    final km = _kmEntre(origenLocal, destino);
-    final precios = _calcularPrecios(km);
-    final precioLocal = precios['local'];
-    final precioCadete = precios['cadete'];
-    final now = Timestamp.now();
-    final batch = FirebaseFirestore.instance.batch();
-
-    final pedidoEnCursoRef =
-        FirebaseFirestore.instance.collection('pedidosEnCurso').doc(idPedido);
-    final pedidoRef =
-        FirebaseFirestore.instance.collection('pedidos').doc(idPedido);
-
-    final pedidoEnCursoSnap = await pedidoEnCursoRef.get();
-    final pedidoData = pedidoEnCursoSnap.data() ?? {};
-
-    // historial general
-    batch.set(pedidoRef, {
-      ...pedidoData,
-      'estado': 'entregado',
-      'fechaEntregado': now,
-      'distancia_km': km,
-      'montoTotal': precioLocal,
-      'montoCadete': precioCadete,
-    });
-
-    // eliminar del mapa
-    batch.delete(pedidoEnCursoRef);
-
-    // historiales individuales
-    final localData = await FirebaseFirestore.instance
-        .collection('usuarios')
-        .doc(uidLocal)
-        .get();
-    final cadeteData = await FirebaseFirestore.instance
-        .collection('usuarios')
-        .doc(cadete.uid)
-        .get();
-
-    final nombreLocal = localData.data()?['nombre'] ?? 'Local';
-    final nombreCadete = cadeteData.data()?['nombre'] ?? 'Cadete';
-    final idCadete = cadeteData.data()?['id'] ?? cadete.uid;
-
-    final histLocalRef = FirebaseFirestore.instance
-        .collection('usuarios')
-        .doc(uidLocal)
-        .collection('historial')
-        .doc();
-    batch.set(histLocalRef, {
-      'cliente': _selectedCliente ?? 'Cliente',
-      'distancia': km,
-      'montoTotal': precioLocal,
-      'fecha': now,
-      'estado': 'entregado',
-      'cadeteNombre': nombreCadete,
-      'idCadete': idCadete,
-    });
-
-    final histCadeteRef = FirebaseFirestore.instance
-        .collection('usuarios')
-        .doc(cadete.uid)
-        .collection('historial')
-        .doc();
-    batch.set(histCadeteRef, {
-      'cliente': _selectedCliente ?? 'Cliente',
-      'distancia': km,
-      'montoCadete': precioCadete,
-      'fecha': now,
-      'estado': 'entregado',
-      'localNombre': nombreLocal,
-    });
-
-    await batch.commit();
-
-    if (!mounted) return;
-    setState(() => _selectedPedidoId = null);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Pedido entregado ✅')),
-    );
-  }
-
-  @override
-  void dispose() {
-    _positionSubscription?.cancel();
-    super.dispose();
   }
 
   Future<String> _nombreLocal(String idLocal) async {
@@ -413,21 +343,516 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     final estado = (d['estado'] ?? '').toString();
     final asignado = (d['idCadete'] ?? '').toString();
     final esMio = uidCadete != null && asignado == uidCadete;
+
     final localEntrego =
         estado == 'entregado_al_cadete' || estado == 'entregado';
     return esMio && localEntrego;
   }
 
-  // Chip de pago para el cadete
+  // Abrir Google Maps normal (solo Android) para navegar al destino del cliente
+  Future<void> _comenzarRecorridoGoogleMaps(LatLng destino) async {
+    if (!Platform.isAndroid) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Navegación disponible solo en Android')),
+      );
+      return;
+    }
+
+    final lat = destino.latitude;
+    final lng = destino.longitude;
+
+    final native = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    final web = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+    );
+
+    try {
+      final okNative =
+          await launchUrl(native, mode: LaunchMode.externalApplication);
+      if (!okNative) {
+        await launchUrl(web, mode: LaunchMode.externalApplication);
+      }
+    } catch (_) {
+      await launchUrl(web, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  // ✅ Abre Google Maps hacia la ubicación del local
+  Future<void> _comenzarRecorridoAlLocal(String idLocal) async {
+    LatLng? localPos = _ubicacionesLocales[idLocal];
+
+    if (localPos == null) {
+      final doc = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(idLocal)
+          .get();
+
+      final data = doc.data();
+      final u = data?['ubicacion'];
+      if (u is Map && u['lat'] != null && u['lng'] != null) {
+        localPos = LatLng(
+          (u['lat'] as num).toDouble(),
+          (u['lng'] as num).toDouble(),
+        );
+        _ubicacionesLocales[idLocal] = localPos;
+      }
+
+      final telLocal = (data?['telefono'] ?? '').toString();
+      if (telLocal.trim().isNotEmpty) {
+        _telefonosLocales[idLocal] = telLocal.trim();
+      }
+    }
+
+    if (localPos == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se encontró la ubicación del local')),
+      );
+      return;
+    }
+
+    await _comenzarRecorridoGoogleMaps(localPos);
+  }
+
+  Future<void> _llamarTelefono(String telefono) async {
+    final telFmt = telefono.replaceAll(RegExp(r'\D'), '');
+    if (telFmt.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay teléfono disponible')),
+      );
+      return;
+    }
+
+    final uri = Uri.parse('tel:$telFmt');
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  // ✅ bloqueo por local antes de aceptar (REAL: mira pedidos activos, NO localActivoId)
+  Future<String?> _validarBloqueoLocalAntesDeAceptar({
+    required String uidCadete,
+    required String idLocalSeleccionado,
+  }) async {
+    final q = await FirebaseFirestore.instance
+        .collection('pedidosEnCurso')
+        .where('idCadete', isEqualTo: uidCadete)
+        .where('estado', whereIn: _estadosActivos)
+        .get();
+
+    if (q.docs.isEmpty) return null;
+
+    final localesActivos = q.docs
+        .map((d) => (d.data()['idLocal'] ?? '').toString())
+        .where((s) => s.isNotEmpty)
+        .toSet();
+
+    if (localesActivos.isNotEmpty &&
+        !localesActivos.contains(idLocalSeleccionado)) {
+      return 'Ya tenés pedidos activos de otro local. Terminá esos pedidos para aceptar de este local.';
+    }
+    return null;
+  }
+
+  // 2da app: subtotal/envío/total
+  num? _leerSubtotal(Map<String, dynamic> pedidoData) {
+    final n = _toNum(pedidoData['subtotal']);
+    if (n != null && n >= 0) return n;
+    return null;
+  }
+
+  num? _leerEnvioCosto(Map<String, dynamic> pedidoData) {
+    final envio = (pedidoData['envio'] as Map?)?.cast<String, dynamic>();
+    final n1 = _toNum(envio?['costo']);
+    if (n1 != null && n1 >= 0) return n1;
+    final n2 = _toNum(envio?['envioCosto']);
+    if (n2 != null && n2 >= 0) return n2;
+    final n3 = _toNum(pedidoData['envioCosto']);
+    if (n3 != null && n3 >= 0) return n3;
+    return null;
+  }
+
+  num? _leerTotalPedido(Map<String, dynamic> pedidoData) {
+    final n = _toNum(pedidoData['total']);
+    if (n != null && n >= 0) return n;
+
+    final sub = _leerSubtotal(pedidoData);
+    final env = _leerEnvioCosto(pedidoData);
+    if (sub != null && env != null) return sub + env;
+
+    return null;
+  }
+
+  Map<String, dynamic> _extraerPagoCampos(Map<String, dynamic> pedidoData) {
+    final out = <String, dynamic>{};
+
+    String? metodo = pedidoData['pagoMetodo'] as String?;
+    num? monto = pedidoData['pagoMonto'] as num?;
+    String? via = pedidoData['pagoVia'] as String?;
+    String? resumen = pedidoData['pagoResumen'] as String?;
+
+    final pago = (pedidoData['pago'] as Map?)?.cast<String, dynamic>();
+    metodo ??= pago?['metodo'] as String?;
+    monto ??= pago?['monto'] as num?;
+    via ??= pago?['via'] as String?;
+    resumen ??= pago?['resumen'] as String?;
+
+    if (metodo != null) out['pagoMetodo'] = metodo;
+    if (monto != null) out['pagoMonto'] = monto;
+    if (via != null) out['pagoVia'] = via;
+    if (resumen != null && resumen.trim().isNotEmpty) {
+      out['pagoResumen'] = resumen;
+    }
+    if (pago != null && pago.isNotEmpty) out['pago'] = pago;
+
+    return out;
+  }
+
+  // ✅ ACEPTAR: BLOQUEA SOLO SI HAY PEDIDOS ACTIVOS DE OTRO LOCAL (NO usa localActivoId)
+  Future<void> _aceptarPedido() async {
+    if (_selectedPedidoId == null || _selectedLocalId == null) return;
+
+    final cadete = FirebaseAuth.instance.currentUser;
+    if (cadete == null) return;
+
+    // ✅ bloqueo real antes de aceptar (según pedidosEnCurso activos)
+    final bloqueo = await _validarBloqueoLocalAntesDeAceptar(
+      uidCadete: cadete.uid,
+      idLocalSeleccionado: _selectedLocalId!,
+    );
+    if (bloqueo != null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(bloqueo)));
+      return;
+    }
+
+    // nombre real cadete
+    String nombreCadete = 'Cadete';
+    try {
+      final cadeteDoc = await FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(cadete.uid)
+          .get();
+      final n = (cadeteDoc.data()?['nombre'] ?? '').toString().trim();
+      if (n.isNotEmpty) nombreCadete = n;
+    } catch (_) {}
+
+    final ref = FirebaseFirestore.instance
+        .collection('pedidosEnCurso')
+        .doc(_selectedPedidoId!);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((txn) async {
+        final snap = await txn.get(ref);
+        if (!snap.exists) throw Exception('El pedido ya no existe.');
+
+        final data = (snap.data() ?? <String, dynamic>{});
+        final estado = (data['estado'] ?? '').toString();
+        final idCadeteActual = (data['idCadete'] ?? '').toString();
+
+        if (estado != 'pendiente' || idCadeteActual.isNotEmpty) {
+          throw Exception('El pedido ya fue aceptado por otro cadete.');
+        }
+
+        // ✅ LO COCINADO
+        final montoCad = _toInt(data['montoCadete']);
+        final montoTot = _toInt(data['montoTotal']);
+
+        // ✅ kmMost: primero distanciaKmMostrable; si no existe, usar distancia_km
+        double? kmMost = _toDouble(data['distanciaKmMostrable']);
+        kmMost ??= _toDouble(data['distancia_km']);
+
+        // ✅ kmReal: si existe distanciaKmReal usarla; si no existe, copiar
+        double? kmReal = _toDouble(data['distanciaKmReal']);
+        kmReal ??= _toDouble(data['distancia_km']);
+        kmReal ??= kmMost;
+
+        final double? kmMostFinal = kmMost == null ? null : _to1Decimal(kmMost);
+        final double? kmRealFinal = kmReal;
+
+        int? montoCadFinal = montoCad;
+        int? montoTotFinal = montoTot;
+
+        // fallback LEGACY: pedido viejísimo sin montos/distancia guardados
+        if (montoCadFinal == null ||
+            montoTotFinal == null ||
+            kmMostFinal == null) {
+          final uO = data['ubicacionOrigen'];
+          final uD = data['ubicacionDestino'];
+          if (uO is Map &&
+              uD is Map &&
+              uO['lat'] != null &&
+              uO['lng'] != null &&
+              uD['lat'] != null &&
+              uD['lng'] != null) {
+            final origen = LatLng(
+              (uO['lat'] as num).toDouble(),
+              (uO['lng'] as num).toDouble(),
+            );
+            final destino = LatLng(
+              (uD['lat'] as num).toDouble(),
+              (uD['lng'] as num).toDouble(),
+            );
+
+            final kmExact = _kmEntre(origen, destino);
+            final kmMostFallback = _to1Decimal(kmExact);
+            final kmRealFallback = double.parse(kmExact.toStringAsFixed(3));
+
+            int baseCadete;
+            if (kmMostFallback <= 1.0) {
+              baseCadete = 65;
+            } else if (kmMostFallback <= 2.0) {
+              baseCadete = 85;
+            } else if (kmMostFallback <= 3.0) {
+              baseCadete = 105;
+            } else if (kmMostFallback <= 4.0) {
+              baseCadete = 125;
+            } else if (kmMostFallback <= 5.0) {
+              baseCadete = 145;
+            } else if (kmMostFallback <= 6.0) {
+              baseCadete = 165;
+            } else if (kmMostFallback <= 7.0) {
+              baseCadete = 185;
+            } else if (kmMostFallback <= 8.0) {
+              baseCadete = 205;
+            } else if (kmMostFallback <= 8.5) {
+              baseCadete = 225;
+            } else {
+              baseCadete = 0;
+            }
+
+            montoCadFinal = baseCadete;
+            montoTotFinal = baseCadete + _gananciaYendo;
+
+            txn.update(ref, <String, dynamic>{
+              'distanciaKmMostrable': kmMostFallback,
+              'distanciaKmReal': kmRealFallback,
+              'distancia_km': kmRealFallback, // compat
+            });
+          }
+        }
+
+        final telefonoCliente = (data['telefonoCliente'] ?? '').toString();
+
+        txn.update(ref, <String, dynamic>{
+          'estado': 'aceptado',
+          'idCadete': cadete.uid,
+          'fechaAceptado': FieldValue.serverTimestamp(),
+          'cadeteNombre': nombreCadete,
+          'asignado': <String, dynamic>{
+            'cadeteId': cadete.uid,
+            'cadeteNombre': nombreCadete,
+          },
+          if (montoCadFinal != null) 'montoCadete': montoCadFinal,
+          if (montoTotFinal != null) 'montoTotal': montoTotFinal,
+          'montoGananciaAdmin': _gananciaYendo,
+          if (kmMostFinal != null) 'distanciaKmMostrable': kmMostFinal,
+          if (kmRealFinal != null) 'distanciaKmReal': kmRealFinal,
+          if (kmRealFinal != null) 'distancia_km': kmRealFinal,
+          if (telefonoCliente.isNotEmpty) 'telefonoCliente': telefonoCliente,
+        });
+      });
+
+      if (mounted) {
+        setState(() => _selectedPedidoId = null);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Pedido aceptado')));
+        unawaited(_dibujarMarkersMapLibre());
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
+  /// ✅ ENTREGAR (ANTI DUPLICADOS) + guarda subtotal/envío/total+pago para admin
+  Future<void> _entregarPedido(
+      String idPedido, String uidLocal, LatLng destino) async {
+    final cadete = FirebaseAuth.instance.currentUser;
+    if (cadete == null) return;
+
+    if (_entregando) return;
+    if (mounted) setState(() => _entregando = true);
+
+    final db = FirebaseFirestore.instance;
+
+    final pedidoEnCursoRef = db.collection('pedidosEnCurso').doc(idPedido);
+    final pedidoRef = db.collection('pedidos').doc(idPedido);
+
+    final histLocalRef = db
+        .collection('usuarios')
+        .doc(uidLocal)
+        .collection('historial')
+        .doc(idPedido);
+
+    final histCadeteRef = db
+        .collection('usuarios')
+        .doc(cadete.uid)
+        .collection('historial')
+        .doc(idPedido);
+
+    try {
+      await db.runTransaction((txn) async {
+        final snap = await txn.get(pedidoEnCursoRef);
+        if (!snap.exists) return;
+
+        final pedidoData = snap.data() ?? <String, dynamic>{};
+
+        // guard anti-duplicado
+        if (pedidoData['pasadoAHistorial'] == true) return;
+
+        final clientePedido = (pedidoData['cliente'] ?? 'Cliente').toString();
+
+        final double kmMost = _as1DecimalDouble(
+          pedidoData['distanciaKmMostrable'] ?? pedidoData['distancia_km'],
+          def: 0,
+        );
+
+        final double? kmReal = _toDouble(pedidoData['distanciaKmReal']) ??
+            _toDouble(pedidoData['distancia_km']);
+
+        final int? montoCad = _toInt(pedidoData['montoCadete']);
+        final int? montoTot = _toInt(pedidoData['montoTotal']);
+
+        if (kmMost <= 0 || montoCad == null || montoTot == null) {
+          throw Exception('Pedido sin montos/distancia guardados.');
+        }
+
+        final double kmTarifaLocal = _as1DecimalDouble(
+          pedidoData['kmTarifaLocal'] ?? kmMost,
+          def: kmMost,
+        );
+
+        // ✅ datos 2da app
+        final num? subtotal = _leerSubtotal(pedidoData);
+        final num? envioCosto = _leerEnvioCosto(pedidoData);
+        final num? totalPedido = _leerTotalPedido(pedidoData);
+        final pagoExtra = _extraerPagoCampos(pedidoData);
+
+        String nombreLocal = 'Local';
+        String nombreCadete = 'Cadete';
+        dynamic idCadete = cadete.uid;
+
+        try {
+          final locSnap =
+              await txn.get(db.collection('usuarios').doc(uidLocal));
+          final cadSnap =
+              await txn.get(db.collection('usuarios').doc(cadete.uid));
+          nombreLocal = (locSnap.data()?['nombre'] ?? 'Local').toString();
+          nombreCadete = (cadSnap.data()?['nombre'] ?? 'Cadete').toString();
+          idCadete = cadSnap.data()?['id'] ?? cadete.uid;
+        } catch (_) {}
+
+        final now = Timestamp.now();
+
+        txn.update(pedidoEnCursoRef, <String, dynamic>{
+          'pasadoAHistorial': true,
+          'estado': 'entregado',
+          'fechaEntregado': now,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        txn.set(
+          pedidoRef,
+          <String, dynamic>{
+            ...pedidoData,
+            'estado': 'entregado',
+            'fechaEntregado': now,
+            'distanciaKmMostrable': kmMost,
+            'kmTarifaLocal': kmTarifaLocal,
+            if (kmReal != null) 'distanciaKmReal': kmReal,
+
+            // envío legacy
+            'montoTotal': montoTot,
+            'montoCadete': montoCad,
+            'montoGananciaAdmin': _gananciaYendo,
+
+            // ✅ admin: venta/envío/total (2da app)
+            if (subtotal != null) 'subtotal': subtotal,
+            if (envioCosto != null) 'envioCosto': envioCosto,
+            if (totalPedido != null) 'total': totalPedido,
+            ...pagoExtra,
+
+            'distancia_km': kmReal ?? kmMost,
+          },
+          SetOptions(merge: true),
+        );
+
+        // HISTORIAL LOCAL (admin lo ve)
+        txn.set(
+          histLocalRef,
+          <String, dynamic>{
+            'cliente': clientePedido,
+            'distancia': kmMost,
+            'distanciaKmMostrable': kmMost,
+            'kmTarifaLocal': kmTarifaLocal,
+            if (kmReal != null) 'distanciaKmReal': kmReal,
+
+            // envío legacy
+            'montoTotal': montoTot,
+            'montoGananciaAdmin': _gananciaYendo,
+
+            // ✅ admin: venta/envío/total (2da app)
+            if (subtotal != null) 'subtotal': subtotal,
+            if (envioCosto != null) 'envioCosto': envioCosto,
+            if (totalPedido != null) 'total': totalPedido,
+            ...pagoExtra,
+
+            'fecha': now,
+            'estado': 'entregado',
+            'cadeteNombre': nombreCadete,
+            'idCadete': idCadete,
+          },
+          SetOptions(merge: true),
+        );
+
+        // HISTORIAL CADETE
+        txn.set(
+          histCadeteRef,
+          <String, dynamic>{
+            'cliente': clientePedido,
+            'distancia': kmMost,
+            'distanciaKmMostrable': kmMost,
+            if (kmReal != null) 'distanciaKmReal': kmReal,
+            'montoCadete': montoCad,
+            'fecha': now,
+            'estado': 'entregado',
+            'localNombre': nombreLocal,
+          },
+          SetOptions(merge: true),
+        );
+
+        txn.delete(pedidoEnCursoRef);
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Pedido entregado')));
+        setState(() => _selectedPedidoId = null);
+        unawaited(_dibujarMarkersMapLibre());
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error al entregar: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _entregando = false);
+    }
+  }
+
+  // ========== Chip de pago para el cadete ==========
   String _labelMetodo(String v) {
     switch (v) {
-      case 'debito':
+      case 'débito':
         return 'débito';
       case 'efectivo':
         return 'efectivo';
       case 'transferencia':
         return 'transferencia';
-      case 'credito':
+      case 'crédito':
         return 'crédito';
       case 'qr':
         return 'QR';
@@ -447,8 +872,11 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     }
   }
 
-  Widget _pagoChipParaCadete(BuildContext context, Map<String, dynamic> data,
-      {bool soloSiEsDebito = false}) {
+  Widget _pagoChipParaCadete(
+    BuildContext context,
+    Map<String, dynamic> data, {
+    bool soloSiEsDebito = false,
+  }) {
     String? metodo = data['pagoMetodo'] as String?;
     num? monto = data['pagoMonto'] as num?;
     String? via = data['pagoVia'] as String?;
@@ -471,14 +899,18 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
             color: chipColor,
             borderRadius: BorderRadius.circular(16),
           ),
-          child: Text(resumen,
-              style: const TextStyle(fontWeight: FontWeight.w600)),
+          child: Text(
+            resumen,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
         );
       }
       return const SizedBox.shrink();
     }
 
-    if (soloSiEsDebito && metodo != 'debito') return const SizedBox.shrink();
+    if (soloSiEsDebito && metodo != 'debito' && metodo != 'débito') {
+      return const SizedBox.shrink();
+    }
 
     final f = NumberFormat.currency(locale: 'es_UY', symbol: r'$');
     final metodoTxt = _labelMetodo(metodo);
@@ -488,7 +920,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
         : '${f.format(monto)} ($metodoTxt)';
 
     IconData icono() {
-      if (metodo == 'debito') {
+      if (metodo == 'debito' || metodo == 'débito') {
         if (via == 'pos') return Icons.point_of_sale;
         if (via == 'link') return Icons.link;
         return Icons.credit_card;
@@ -499,6 +931,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
         case 'transferencia':
           return Icons.swap_horiz;
         case 'credito':
+        case 'crédito':
           return Icons.credit_card;
         case 'qr':
           return Icons.qr_code_scanner;
@@ -521,13 +954,177 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
         children: [
           Icon(icono(), size: 18),
           const SizedBox(width: 6),
-          Text(
-            texto,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
+          Text(texto, style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
       ),
     );
+  }
+  // =================================================
+
+  String _colorToHex(Color color) {
+    final argb = color.toARGB32().toRadixString(16).padLeft(8, '0');
+    return '#${argb.substring(2)}';
+  }
+
+  Future<void> _limpiarMarkersMapLibre() async {
+    final map = _mapLibreController;
+    if (map == null) return;
+
+    for (final c in List<maplibre.Circle>.from(_circles)) {
+      try {
+        await map.removeCircle(c);
+      } catch (_) {}
+    }
+
+    for (final s in List<maplibre.Symbol>.from(_symbols)) {
+      try {
+        await map.removeSymbol(s);
+      } catch (_) {}
+    }
+
+    _circles.clear();
+    _symbols.clear();
+    _circlePedidos.clear();
+  }
+
+  Future<void> _dibujarMarkersMapLibre() async {
+    final map = _mapLibreController;
+    final cadete = FirebaseAuth.instance.currentUser;
+
+    if (!_mapStyleLoaded || map == null || _currentPosition == null) return;
+
+    await _limpiarMarkersMapLibre();
+
+    // 🛵 cadete / motito
+    final moto = await map.addSymbol(
+      maplibre.SymbolOptions(
+        geometry: maplibre.LatLng(
+          _currentPosition!.latitude,
+          _currentPosition!.longitude,
+        ),
+        textField: '🛵',
+        textSize: 28,
+        textAnchor: 'center',
+      ),
+    );
+    _symbols.add(moto);
+
+    // ⚫ locales: punto negro redondo (estable, sin emojis ni PNG)
+    for (final pos in _ubicacionesLocales.values) {
+      final local = await map.addCircle(
+        maplibre.CircleOptions(
+          geometry: maplibre.LatLng(pos.latitude, pos.longitude),
+          circleColor: '#000000',
+          circleRadius: 7,
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 2,
+        ),
+      );
+      _circles.add(local);
+    }
+
+    // puntos de pedidos/clientes
+    for (final p in _pedidos) {
+      final d = p.data();
+      final estado = (d['estado'] ?? '').toString();
+      final idLocalPedido = (d['idLocal'] ?? '').toString();
+      final idCadetePedido = (d['idCadete'] ?? '').toString();
+
+      final uDest = d['ubicacionDestino'];
+      if (uDest is! Map || uDest['lat'] == null || uDest['lng'] == null) {
+        continue;
+      }
+
+      final lat = (uDest['lat'] as num).toDouble();
+      final lng = (uDest['lng'] as num).toDouble();
+
+      final esMio = idCadetePedido == (cadete?.uid ?? '');
+      final esPendienteLibre = estado == 'pendiente' && idCadetePedido.isEmpty;
+
+      final esDelMismoLocal = _miLocalActivoId != null &&
+          _miLocalActivoId!.isNotEmpty &&
+          idLocalPedido == _miLocalActivoId;
+
+      final esDemorado20Min = _pedidoPendienteDemorado20Min(d);
+
+      final color = esMio
+          ? Colors.green
+          : (esPendienteLibre && esDemorado20Min)
+              ? Colors.purple
+              : (esPendienteLibre && esDelMismoLocal)
+                  ? Colors.amber
+                  : Colors.red;
+
+      final circle = await map.addCircle(
+        maplibre.CircleOptions(
+          geometry: maplibre.LatLng(lat, lng),
+          circleColor: _colorToHex(color),
+          circleRadius: 10,
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 2,
+        ),
+      );
+
+      _circles.add(circle);
+      _circlePedidos[circle] = p;
+    }
+  }
+
+  Future<void> _seleccionarPedidoDesdeCircle(maplibre.Circle circle) async {
+    final p = _circlePedidos[circle];
+    if (p == null) return;
+
+    final d = p.data();
+    final estado = (d['estado'] ?? '').toString();
+    final idLocalPedido = (d['idLocal'] ?? '').toString();
+
+    if (!_estadosVisibles.contains(estado)) return;
+
+    final uDest = d['ubicacionDestino'];
+    if (uDest is! Map || uDest['lat'] == null || uDest['lng'] == null) {
+      return;
+    }
+
+    final pos = LatLng(
+      (uDest['lat'] as num).toDouble(),
+      (uDest['lng'] as num).toDouble(),
+    );
+
+    final nomLoc = await _nombreLocal(idLocalPedido);
+
+    final docLoc = await FirebaseFirestore.instance
+        .collection('usuarios')
+        .doc(idLocalPedido)
+        .get();
+
+    final locData = docLoc.data();
+    final direccionLoc = (locData?['direccion'] ?? '').toString();
+    final telefonoLocal = (locData?['telefono'] ?? '').toString().trim();
+
+    if (telefonoLocal.isNotEmpty) {
+      _telefonosLocales[idLocalPedido] = telefonoLocal;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _selectedPedidoId = p.id;
+      _selectedDestino = pos;
+      _selectedCliente = (d['cliente'] ?? '').toString();
+      _selectedLocalId = idLocalPedido;
+      _selectedNombreLocal = nomLoc;
+      _selectedDireccionLocal = direccionLoc;
+      _selectedTelefonoLocal = telefonoLocal;
+    });
+  }
+
+  @override
+  void dispose() {
+    _timerColores?.cancel();
+    _positionSubscription?.cancel();
+    _pedidosSubscription?.cancel();
+    _audioPlayer.dispose();
+    super.dispose();
   }
 
   @override
@@ -539,107 +1136,68 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Stack(
               children: [
-                // Mapa
-                FlutterMap(
-                  mapController: mapController,
-                  options: MapOptions(
-                    initialCenter: _currentPosition!,
-                    initialZoom: 14,
-                    onTap: (_, __) => setState(() => _selectedPedidoId = null),
+                maplibre.MapLibreMap(
+                  styleString: _mapStyle,
+                  initialCameraPosition: maplibre.CameraPosition(
+                    target: maplibre.LatLng(
+                      _currentPosition!.latitude,
+                      _currentPosition!.longitude,
+                    ),
+                    zoom: 11,
                   ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=jKh3fbz0oFEuYjlFsboz',
-                      userAgentPackageName: 'com.yendo.yendoo_app',
-                    ),
-                    MarkerLayer(
-                      markers: [
-                        // pedidos (ya vienen filtrados)
-                        ..._pedidos.map((p) {
-                          final d = p.data();
-                          // ub destino
-                          final uDest = d['ubicacionDestino'];
-                          double? lat, lng;
-                          if (uDest is Map) {
-                            lat = (uDest['lat'] as num?)?.toDouble();
-                            lng = (uDest['lng'] as num?)?.toDouble();
-                          }
-                          if (lat == null || lng == null) {
-                            // no marker si faltan coords
-                            return const Marker(
-                              point: LatLng(0, 0),
-                              width: 0,
-                              height: 0,
-                              child: SizedBox.shrink(),
-                            );
-                          }
-                          final pos = LatLng(lat, lng);
-
-                          final esMio =
-                              (d['idCadete'] ?? '') == (cadete?.uid ?? '');
-                          final color = esMio ? Colors.green : Colors.red;
-
-                          return Marker(
-                            point: pos,
-                            width: 40,
-                            height: 40,
-                            child: GestureDetector(
-                              onTap: () async {
-                                final estado = (d['estado'] ?? '').toString();
-                                if (_estadosVisibles.contains(estado)) {
-                                  final idLocal =
-                                      (d['idLocal'] ?? '').toString();
-                                  final nomLoc = await _nombreLocal(idLocal);
-                                  final docLoc = await FirebaseFirestore
-                                      .instance
-                                      .collection('usuarios')
-                                      .doc(idLocal)
-                                      .get();
-                                  final direccionLoc =
-                                      (docLoc.data()?['direccion'] ?? '')
-                                          .toString();
-                                  if (!mounted) return;
-                                  setState(() {
-                                    _selectedPedidoId = p.id;
-                                    _selectedDestino = pos;
-                                    _selectedCliente =
-                                        (d['cliente'] ?? '').toString();
-                                    _selectedLocalId = idLocal;
-                                    _selectedNombreLocal = nomLoc;
-                                    _selectedDireccionLocal = direccionLoc;
-                                  });
-                                }
-                              },
-                              child: Icon(Icons.location_on,
-                                  color: color, size: 40),
-                            ),
-                          );
-                        }).where((m) => m.width != 0),
-                        // locales
-                        ..._ubicacionesLocales.values.map(
-                          (pos) => Marker(
-                            point: pos,
-                            width: 30,
-                            height: 30,
-                            child: Image.asset('assets/icono_local.png'),
-                          ),
-                        ),
-                        // cadete
-                        if (_currentPosition != null)
-                          Marker(
-                            point: _currentPosition!,
-                            width: 30,
-                            height: 30,
-                            child: const Icon(Icons.motorcycle,
-                                color: Colors.blue),
-                          ),
-                      ],
-                    ),
-                  ],
+                  minMaxZoomPreference:
+                      const maplibre.MinMaxZoomPreference(11, 17),
+                  myLocationEnabled: true,
+                  myLocationTrackingMode:
+                      maplibre.MyLocationTrackingMode.tracking,
+                  onMapCreated: (controller) {
+                    _mapLibreController = controller;
+                    _mapLibreController!.onCircleTapped
+                        .add(_seleccionarPedidoDesdeCircle);
+                  },
+                  onStyleLoadedCallback: () async {
+                    _mapStyleLoaded = true;
+                    await _dibujarMarkersMapLibre();
+                  },
+                  onMapClick: (_, __) {
+                    setState(() {
+                      _selectedPedidoId = null;
+                      _selectedTelefonoLocal = null;
+                    });
+                  },
                 ),
 
-                // panel inferior (protegido y sin overflows)
+                // ✅ Botones de zoom fijo: 17, 15, 13 y 11
+                Positioned(
+                  top: 50,
+                  right: 12,
+                  child: SafeArea(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [17, 15, 13, 11].map((z) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: FloatingActionButton.small(
+                            heroTag: 'pedidos_pendientes_zoom_$z',
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            elevation: 4,
+                            onPressed: () => _irAZoom(z.toDouble()),
+                            child: Text(
+                              '$z',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+
+                // panel inferior
                 if (_selectedPedidoId != null &&
                     _selectedDestino != null &&
                     _selectedLocalId != null)
@@ -656,47 +1214,100 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
                           child: Builder(
                             builder: (_) {
                               final pedidoSel = _pedidos.firstWhereOrNull(
-                                  (doc) => doc.id == _selectedPedidoId);
+                                (doc) => doc.id == _selectedPedidoId,
+                              );
                               if (pedidoSel == null) {
                                 return const SizedBox.shrink();
                               }
+
                               final d = pedidoSel.data();
                               final estado = (d['estado'] ?? '').toString();
                               final idCadete = (d['idCadete'] ?? '').toString();
                               final telefono =
                                   (d['telefonoCliente'] ?? '').toString();
+                              final telefonoLocal = (_selectedTelefonoLocal ??
+                                      _telefonosLocales[
+                                          _selectedLocalId ?? ''] ??
+                                      '')
+                                  .toString();
 
                               final esMio = idCadete == (cadete?.uid ?? '');
                               final puedeEntregar =
                                   _puedeEntregar(d, cadete?.uid);
+                              final esDemorado20Min =
+                                  _pedidoPendienteDemorado20Min(d);
 
-                              /// Botón de llamar **sin** url_launcher
+                              final mostrarIrAlLocal =
+                                  esMio && estado == 'aceptado';
+
+                              final mostrarComenzar = esMio &&
+                                  (estado == 'entregado_al_cadete' ||
+                                      estado == 'entregado' ||
+                                      estado == 'listo');
+
                               Widget buildCallBtn() {
                                 if (!esMio || telefono.isEmpty) {
                                   return const SizedBox.shrink();
                                 }
+
+                                final telFmt =
+                                    telefono.replaceAll(RegExp(r'\D'), '');
+                                final uri = Uri.parse('tel:$telFmt');
+
                                 return SizedBox(
                                   height: 44,
                                   child: ElevatedButton.icon(
-                                    onPressed: () {
-                                      final messenger =
-                                          ScaffoldMessenger.of(context);
-                                      messenger.showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            'Llamada desactivada temporalmente. Tel: $telefono',
-                                          ),
-                                        ),
+                                    onPressed: () async {
+                                      await launchUrl(
+                                        uri,
+                                        mode: LaunchMode.externalApplication,
                                       );
                                     },
                                     icon: const Icon(Icons.phone,
                                         color: Colors.blue),
-                                    label: const Text('📞 Llamar al cliente'),
+                                    label: const Text('Llamar al cliente'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blue.shade50,
-                                      foregroundColor: Colors.black87,
+                                      backgroundColor: Colors.blueAccent,
+                                      foregroundColor: Colors.white,
                                     ),
                                   ),
+                                );
+                              }
+
+                              Widget buildCallLocalBtn() {
+                                if (!esMio || telefonoLocal.trim().isEmpty) {
+                                  return const SizedBox.shrink();
+                                }
+
+                                return SizedBox(
+                                  height: 44,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () async {
+                                      await _llamarTelefono(telefonoLocal);
+                                    },
+                                    icon: const Icon(Icons.store),
+                                    label: const Text('Llamar al local'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                  ),
+                                );
+                              }
+
+                              // ✅ MOSTRAR PRECIO GUARDADO
+                              Widget buildPagoCadete() {
+                                final pagoGuardado = _toInt(d['montoCadete']);
+                                if (pagoGuardado != null && pagoGuardado > 0) {
+                                  return Text(
+                                    'Pago al cadete: \$${pagoGuardado.toString()}',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700),
+                                  );
+                                }
+                                return const Text(
+                                  'Pago al cadete: (sin monto guardado)',
+                                  style: TextStyle(fontWeight: FontWeight.w700),
                                 );
                               }
 
@@ -709,34 +1320,23 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
                                   if ((_selectedDireccionLocal ?? '')
                                       .isNotEmpty)
                                     Text('Dirección: $_selectedDireccionLocal'),
-
-                                  // Chip pago cliente
+                                  if (estado == 'pendiente' && esDemorado20Min)
+                                    const Padding(
+                                      padding:
+                                          EdgeInsets.only(top: 4, bottom: 4),
+                                      child: Text(
+                                        '🟣 Pedido con más de 20 minutos - Prioridad alta',
+                                        style: TextStyle(
+                                          color: Colors.purple,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
                                   const SizedBox(height: 6),
                                   _pagoChipParaCadete(context, d),
-
-                                  Builder(builder: (context) {
-                                    final origen =
-                                        _ubicacionesLocales[_selectedLocalId!];
-                                    if (origen == null ||
-                                        _selectedDestino == null) {
-                                      return const Padding(
-                                        padding: EdgeInsets.only(top: 4),
-                                        child: Text('Calculando pago…'),
-                                      );
-                                    }
-                                    final cadetePago = _calcularPrecios(
-                                      _kmEntre(origen, _selectedDestino!),
-                                    )['cadete']
-                                        ?.toStringAsFixed(0);
-                                    return Padding(
-                                      padding: const EdgeInsets.only(top: 4),
-                                      child:
-                                          Text('Pago al cadete: \$$cadetePago'),
-                                    );
-                                  }),
+                                  const SizedBox(height: 6),
+                                  buildPagoCadete(),
                                   const SizedBox(height: 10),
-
-                                  // Acciones
                                   if (estado == 'pendiente' &&
                                       idCadete.isEmpty) ...[
                                     Wrap(
@@ -754,66 +1354,91 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
                                         SizedBox(
                                           height: 44,
                                           child: OutlinedButton.icon(
-                                            onPressed: () => setState(
-                                                () => _selectedPedidoId = null),
+                                            onPressed: () {
+                                              setState(() =>
+                                                  _selectedPedidoId = null);
+                                            },
                                             icon: const Icon(Icons.close),
                                             label: const Text('Cancelar'),
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                  ] else if (puedeEntregar) ...[
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        SizedBox(
-                                          height: 44,
-                                          child: ElevatedButton.icon(
-                                            onPressed: () => _entregarPedido(
-                                              _selectedPedidoId!,
-                                              _selectedLocalId!,
-                                              _selectedDestino!,
-                                            ),
-                                            icon: const Icon(Icons.done_all),
-                                            label: const Text('Entregar'),
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          height: 44,
-                                          child: OutlinedButton.icon(
-                                            onPressed: () => setState(
-                                                () => _selectedPedidoId = null),
-                                            icon: const Icon(Icons.close),
-                                            label: const Text('Cancelar'),
-                                          ),
-                                        ),
-                                        buildCallBtn(),
                                       ],
                                     ),
                                   ] else ...[
-                                    if (esMio)
-                                      const Padding(
-                                        padding: EdgeInsets.only(bottom: 8),
-                                        child: Text(
-                                          'Esperando que el local te entregue el pedido…',
-                                          style: TextStyle(
-                                            fontStyle: FontStyle.italic,
-                                          ),
-                                        ),
-                                      ),
                                     Wrap(
                                       spacing: 8,
                                       runSpacing: 8,
                                       children: [
+                                        if (mostrarIrAlLocal &&
+                                            _selectedLocalId != null)
+                                          SizedBox(
+                                            height: 44,
+                                            child: ElevatedButton.icon(
+                                              onPressed: () {
+                                                _comenzarRecorridoAlLocal(
+                                                  _selectedLocalId!,
+                                                );
+                                              },
+                                              icon: const Icon(Icons.store),
+                                              label: const Text('Ir al local'),
+                                            ),
+                                          ),
+                                        if (puedeEntregar)
+                                          SizedBox(
+                                            height: 44,
+                                            child: ElevatedButton.icon(
+                                              onPressed: _entregando
+                                                  ? null
+                                                  : () {
+                                                      _entregarPedido(
+                                                        _selectedPedidoId!,
+                                                        _selectedLocalId!,
+                                                        _selectedDestino!,
+                                                      );
+                                                    },
+                                              icon: const Icon(Icons.done_all),
+                                              label: Text(_entregando
+                                                  ? 'Entregando...'
+                                                  : 'Entregar'),
+                                            ),
+                                          ),
+                                        if (mostrarComenzar)
+                                          SizedBox(
+                                            height: 44,
+                                            child: ElevatedButton.icon(
+                                              onPressed: () {
+                                                _comenzarRecorridoGoogleMaps(
+                                                  _selectedDestino!,
+                                                );
+                                              },
+                                              icon:
+                                                  const Icon(Icons.navigation),
+                                              label: const Text('Comenzar'),
+                                            ),
+                                          ),
                                         buildCallBtn(),
+                                        buildCallLocalBtn(),
+                                        if (esMio && !puedeEntregar)
+                                          const Padding(
+                                            padding: EdgeInsets.only(
+                                                top: 2, bottom: 2),
+                                            child: Text(
+                                              'Esperando que el local te entregue el pedido',
+                                              style: TextStyle(
+                                                  fontStyle: FontStyle.italic),
+                                            ),
+                                          ),
                                         SizedBox(
                                           height: 44,
                                           child: OutlinedButton.icon(
-                                            onPressed: () => setState(
-                                                () => _selectedPedidoId = null),
+                                            onPressed: () {
+                                              setState(() =>
+                                                  _selectedPedidoId = null);
+                                            },
                                             icon: const Icon(Icons.close),
-                                            label: const Text('Cerrar'),
+                                            label: Text(puedeEntregar
+                                                ? 'Cancelar'
+                                                : 'Cerrar'),
                                           ),
                                         ),
                                       ],

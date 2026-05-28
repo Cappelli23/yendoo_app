@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -34,7 +34,7 @@ class _AdminCadetesScreenState extends State<AdminCadetesScreen> {
     final docs = snap.docs;
     if (!mounted) return;
 
-    // Agrupar por día
+    // Agrupar por dÃ­a
     final Map<String, List<Map<String, dynamic>>> agrupado = {};
     for (var doc in docs) {
       final data = doc.data();
@@ -63,7 +63,7 @@ class _AdminCadetesScreenState extends State<AdminCadetesScreen> {
               );
 
               return ExpansionTile(
-                title: Text('$dia – ${pedidos.length} entregas'),
+                title: Text('$dia “ ${pedidos.length} entregas'),
                 subtitle: Text('Total: \$${totalDia.toStringAsFixed(0)}'),
                 children: pedidos.map((d) {
                   final cliente = d['cliente'] ?? '';
@@ -75,9 +75,9 @@ class _AdminCadetesScreenState extends State<AdminCadetesScreen> {
 
                   return ListTile(
                     dense: true,
-                    title: Text('$cliente – \$${monto.toStringAsFixed(0)}'),
+                    title: Text('$cliente “ \$${monto.toStringAsFixed(0)}'),
                     subtitle: Text(
-                      '$local • $distancia km\n${DateFormat('HH:mm').format(fecha)}',
+                      '$local â€¢ $distancia km\n${DateFormat('HH:mm').format(fecha)}',
                     ),
                   );
                 }).toList(),
@@ -137,3 +137,4 @@ class _AdminCadetesScreenState extends State<AdminCadetesScreen> {
     );
   }
 }
+

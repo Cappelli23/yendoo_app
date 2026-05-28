@@ -2,7 +2,7 @@ name: yendoo_app
 description: Aplicación Yendo desde cero
 publish_to: 'none'
 
-version: 1.0.5+12  # ⬅ nuevo build SOLO para probar sin url_launcher
+version: 1.0.5+116
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -10,27 +10,44 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # ======================
+  # Utilidades generales
+  # ======================
   collection: ^1.17.0
-  # url_launcher: ^6.3.2   # ⬅ LO DESACTIVAMOS TEMPORALMENTE
+  url_launcher: ^6.3.2
   font_awesome_flutter: ^10.7.0
-
-  # Firebase
-  firebase_core: ^4.2.1
-  firebase_auth: ^6.1.2
-  cloud_firestore: ^6.1.0
-
-  # Otros paquetes
+  intl: ^0.20.2
   fluttertoast: ^8.2.12
+
+  # ======================
+  # Mapas y ubicación
+  # ======================
   flutter_map: ^8.1.1
   geolocator: ^14.0.2
   latlong2: ^0.9.0
-  intl: ^0.20.2
 
-  # SONIDO (desactivado por ahora, rompe en iOS)
-  # audioplayers: ^6.5.1
+  # ======================
+  # Firebase
+  # ======================
+  firebase_core: ^4.2.1
+  firebase_auth: ^6.1.2
+  cloud_firestore: ^6.1.0
+  firebase_messaging: ^16.0.0
 
-  # Para AndroidX
+  # ======================
+  # Sonido y notificaciones
+  # ======================
+  audioplayers: ^6.5.1
+  flutter_local_notifications: ^17.2.2
+  permission_handler: ^11.3.0
+
+  # ======================
+  # UI
+  # ======================
   cupertino_icons: ^1.0.6
+  maplibre_gl: 0.24.0
+  flutter_map_location_marker: ^10.2.0
 
 dev_dependencies:
   flutter_test:
@@ -44,6 +61,7 @@ flutter:
     - assets/logo.png
     - assets/icono_local.png
     - assets/sonidos/notificacion.mp3
+    - assets/sonidos/notificacion2.mp3
 
 flutter_launcher_icons:
   android: true

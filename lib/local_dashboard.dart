@@ -1,9 +1,9 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as maplibre;
 
 import 'screens/local/historial_pedidos_screen.dart';
 import 'screens/local/mis_pedidos_screen.dart';
@@ -20,13 +20,19 @@ class LocalDashboard extends StatefulWidget {
 class _LocalDashboardState extends State<LocalDashboard> {
   LatLng? _currentPosition;
   bool _buttonsVisible = true;
-  late final MapController _mapController;
   bool _locationError = false;
+
+  maplibre.MapLibreMapController? _mapLibreController;
+  bool _mapStyleLoaded = false;
+
+  final List<maplibre.Symbol> _symbols = [];
+
+  static const String _mapStyle =
+      'https://api.maptiler.com/maps/openstreetmap/style.json?key=jKh3fbz0oFEuYjlFsboz';
 
   @override
   void initState() {
     super.initState();
-    _mapController = MapController();
     _initLocation();
     _borrarFavoritosAlIniciar();
   }
@@ -34,14 +40,17 @@ class _LocalDashboardState extends State<LocalDashboard> {
   Future<void> _initLocation() async {
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
       if (!serviceEnabled) {
         setState(() => _locationError = true);
         return;
       }
 
       LocationPermission permission = await Geolocator.checkPermission();
+
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
+
         if (permission == LocationPermission.denied) {
           setState(() => _locationError = true);
           return;
@@ -58,35 +67,77 @@ class _LocalDashboardState extends State<LocalDashboard> {
           accuracy: LocationAccuracy.best,
           distanceFilter: 5,
         ),
-      ).listen((Position position) {
-        if (mounted) {
-          setState(() {
-            _currentPosition = LatLng(position.latitude, position.longitude);
-          });
-        }
+      ).listen((Position position) async {
+        if (!mounted) return;
+
+        final pos = LatLng(
+          position.latitude,
+          position.longitude,
+        );
+
+        setState(() {
+          _currentPosition = pos;
+        });
+
+        // ✅ IMPORTANTE:
+        // NO guardar ubicación actual en Firestore
+        // para no pisar la ubicación fija del local
+
+        await _dibujarMarkers();
       });
     } catch (e) {
       setState(() => _locationError = true);
     }
   }
 
+  Future<void> _dibujarMarkers() async {
+    final map = _mapLibreController;
+
+    if (!_mapStyleLoaded || map == null || _currentPosition == null) {
+      return;
+    }
+
+    for (final s in List<maplibre.Symbol>.from(_symbols)) {
+      try {
+        await map.removeSymbol(s);
+      } catch (_) {}
+    }
+
+    _symbols.clear();
+
+    // 🏪 marcador visual del local
+    final localMarker = await map.addSymbol(
+      maplibre.SymbolOptions(
+        geometry: maplibre.LatLng(
+          _currentPosition!.latitude,
+          _currentPosition!.longitude,
+        ),
+        textField: '🏪',
+        textSize: 30,
+        textAnchor: 'center',
+      ),
+    );
+
+    _symbols.add(localMarker);
+  }
+
   Future<void> _borrarFavoritosAlIniciar() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
+
     if (uid == null) return;
 
-    await FirebaseFirestore.instance
-        .collection('usuarios')
-        .doc(uid)
-        .update({'cadetesFavoritos': []});
+    await FirebaseFirestore.instance.collection('usuarios').doc(uid).update({
+      'cadetesFavoritos': [],
+    });
   }
 
   Future<void> _borrarFavoritosAlCerrarSesion() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
+
     if (uid != null) {
-      await FirebaseFirestore.instance
-          .collection('usuarios')
-          .doc(uid)
-          .update({'cadetesFavoritos': []});
+      await FirebaseFirestore.instance.collection('usuarios').doc(uid).update({
+        'cadetesFavoritos': [],
+      });
     }
   }
 
@@ -103,61 +154,102 @@ class _LocalDashboardState extends State<LocalDashboard> {
 
     switch (action) {
       case "generar":
-        safeNavigate(() => Navigator.pushNamed(context, '/generarPedido'));
+        safeNavigate(
+          () => Navigator.pushNamed(
+            context,
+            '/generarPedido',
+          ),
+        );
         break;
+
       case "personalizar":
-        safeNavigate(() => Navigator.pushNamed(context, '/personalizarPedido'));
+        safeNavigate(
+          () => Navigator.pushNamed(
+            context,
+            '/personalizarPedido',
+          ),
+        );
         break;
+
       case "verCadetes":
         final localId = FirebaseAuth.instance.currentUser?.uid;
+
         if (localId != null && mounted) {
-          safeNavigate(() => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => VerCadetesScreen(localId: localId),
+          safeNavigate(
+            () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => VerCadetesScreen(
+                  localId: localId,
                 ),
-              ));
+              ),
+            ),
+          );
         }
         break;
+
       case "misPedidos":
-        safeNavigate(() => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const MisPedidosScreen()),
-            ));
+        safeNavigate(
+          () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const MisPedidosScreen(),
+            ),
+          ),
+        );
         break;
+
       case "historial":
         final localId = FirebaseAuth.instance.currentUser?.uid;
+
         if (localId != null && mounted) {
-          safeNavigate(() => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => HistorialPedidosScreen(localId: localId),
+          safeNavigate(
+            () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => HistorialPedidosScreen(
+                  localId: localId,
                 ),
-              ));
+              ),
+            ),
+          );
         }
         break;
+
       case "logout":
         await _borrarFavoritosAlCerrarSesion();
+
         await FirebaseAuth.instance.signOut();
+
         if (!mounted) return;
-        safeNavigate(() => Navigator.of(context).pushAndRemoveUntil(
-              MaterialPageRoute(builder: (_) => const LoginScreen()),
-              (route) => false,
-            ));
+
+        safeNavigate(
+          () => Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(
+              builder: (_) => const LoginScreen(),
+            ),
+            (route) => false,
+          ),
+        );
         break;
     }
 
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _buttonsVisible = true);
-    });
+    Future.delayed(
+      const Duration(seconds: 2),
+      () {
+        if (mounted) {
+          setState(() => _buttonsVisible = true);
+        }
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
+
     final buttonMaxWidth = screenWidth * 0.85;
 
-    // ❗Mensaje si la ubicación está desactivada / permisos negados
     if (_locationError) {
       return const Scaffold(
         body: Center(
@@ -169,41 +261,38 @@ class _LocalDashboardState extends State<LocalDashboard> {
       );
     }
 
-    // ❗Mientras esperamos ubicación (NO renderizamos mapa aún)
     if (_currentPosition == null) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
       );
     }
 
-    // ✔ Mapa seguro
     return Scaffold(
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _currentPosition!,
-              initialZoom: 16,
+          maplibre.MapLibreMap(
+            styleString: _mapStyle,
+            initialCameraPosition: maplibre.CameraPosition(
+              target: maplibre.LatLng(
+                _currentPosition!.latitude,
+                _currentPosition!.longitude,
+              ),
+              zoom: 16,
             ),
-            children: [
-              TileLayer(
-                urlTemplate:
-                    'https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=jKh3fbz0oFEuYjlFsboz',
-                userAgentPackageName: 'com.yendo.yendoo_app',
-              ),
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: _currentPosition!,
-                    width: 40,
-                    height: 40,
-                    child: const Icon(Icons.location_on,
-                        color: Colors.blue, size: 40),
-                  ),
-                ],
-              ),
-            ],
+            minMaxZoomPreference: const maplibre.MinMaxZoomPreference(
+              13,
+              17,
+            ),
+            myLocationEnabled: false,
+            onMapCreated: (controller) {
+              _mapLibreController = controller;
+            },
+            onStyleLoadedCallback: () async {
+              _mapStyleLoaded = true;
+              await _dibujarMarkers();
+            },
           ),
           if (_buttonsVisible)
             Positioned(
@@ -214,26 +303,51 @@ class _LocalDashboardState extends State<LocalDashboard> {
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Colors.white.withAlpha(217),
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(20)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
                 ),
                 child: Wrap(
                   alignment: WrapAlignment.center,
                   spacing: 12,
                   runSpacing: 12,
                   children: [
-                    _actionButton("Generar pedido", Icons.add_location,
-                        "generar", buttonMaxWidth),
-                    _actionButton("Personalizar", Icons.edit_location_alt,
-                        "personalizar", buttonMaxWidth),
-                    _actionButton("Ver cadetes", Icons.people_alt, "verCadetes",
-                        buttonMaxWidth),
-                    _actionButton("Mis pedidos", Icons.list_alt, "misPedidos",
-                        buttonMaxWidth),
-                    _actionButton("Historial", Icons.history, "historial",
-                        buttonMaxWidth),
-                    _logoutButton("Cerrar sesión", Icons.logout, "logout",
-                        buttonMaxWidth),
+                    _actionButton(
+                      "Generar pedido",
+                      Icons.add_location,
+                      "generar",
+                      buttonMaxWidth,
+                    ),
+                    _actionButton(
+                      "Personalizar",
+                      Icons.edit_location_alt,
+                      "personalizar",
+                      buttonMaxWidth,
+                    ),
+                    _actionButton(
+                      "Ver cadetes",
+                      Icons.people_alt,
+                      "verCadetes",
+                      buttonMaxWidth,
+                    ),
+                    _actionButton(
+                      "Mis pedidos",
+                      Icons.list_alt,
+                      "misPedidos",
+                      buttonMaxWidth,
+                    ),
+                    _actionButton(
+                      "Historial",
+                      Icons.history,
+                      "historial",
+                      buttonMaxWidth,
+                    ),
+                    _logoutButton(
+                      "Cerrar sesión",
+                      Icons.logout,
+                      "logout",
+                      buttonMaxWidth,
+                    ),
                   ],
                 ),
               ),
@@ -244,38 +358,60 @@ class _LocalDashboardState extends State<LocalDashboard> {
   }
 
   Widget _actionButton(
-      String label, IconData icon, String action, double maxWidth) {
+    String label,
+    IconData icon,
+    String action,
+    double maxWidth,
+  ) {
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: ElevatedButton.icon(
         onPressed: () => _handleFABAction(action),
         icon: Icon(icon, size: 20),
-        label: Text(label, style: const TextStyle(fontSize: 14)),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 14),
+        ),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.blueAccent,
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 10,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );
   }
 
   Widget _logoutButton(
-      String label, IconData icon, String action, double maxWidth) {
+    String label,
+    IconData icon,
+    String action,
+    double maxWidth,
+  ) {
     return ConstrainedBox(
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: ElevatedButton.icon(
         onPressed: () => _handleFABAction(action),
         icon: Icon(icon, size: 20),
-        label: Text(label, style: const TextStyle(fontSize: 14)),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 14),
+        ),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.redAccent,
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 10,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
       ),
     );

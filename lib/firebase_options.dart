@@ -1,4 +1,4 @@
-// ignore_for_file: type=lint
+﻿// ignore_for_file: type=lint
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
@@ -72,3 +72,4 @@ class DefaultFirebaseOptions {
     storageBucket: 'yendoo-app.firebasestorage.app',
   );
 }
+

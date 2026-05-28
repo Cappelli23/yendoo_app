@@ -17,8 +17,8 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.yendoo_app"
-    compileSdk = 35
-    ndkVersion = "27.0.12077973"
+    compileSdk = 36
+    ndkVersion = "28.1.13356709"
 
     defaultConfig {
         applicationId = "com.yendoo_app"           // ⚠️ no cambiar
@@ -26,8 +26,8 @@ android {
         targetSdk = 35
 
         // ⬆️ Subí la versión para la actualización
-        versionCode = 103                           // ← mayor que 102
-        versionName = "1.0.4"
+        versionCode = 116                           // ← mayor que 102
+        versionName = "1.0.5"
 
         multiDexEnabled = true
     }

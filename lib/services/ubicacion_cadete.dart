@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
@@ -11,14 +11,14 @@ class UbicacionCadeteService {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // 1️⃣ Verificar que el servicio de ubicación esté activo
+      // 1ï¸âƒ£ Verificar que el servicio de ubicaciÃ³n estÃ© activo
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         // No forzamos nada, simplemente no arrancamos el stream
         return;
       }
 
-      // 2️⃣ Manejo de permisos con cuidado
+      // 2ï¸âƒ£ Manejo de permisos con cuidado
       LocationPermission permiso = await Geolocator.checkPermission();
       if (permiso == LocationPermission.denied) {
         permiso = await Geolocator.requestPermission();
@@ -28,11 +28,11 @@ class UbicacionCadeteService {
       }
 
       if (permiso == LocationPermission.deniedForever) {
-        // Usuario bloqueó permisos desde ajustes → no seguimos
+        // Usuario bloqueÃ³ permisos desde ajustes â†’ no seguimos
         return;
       }
 
-      // 3️⃣ Iniciar stream de ubicación con try/catch implícito
+      // 3ï¸âƒ£ Iniciar stream de ubicaciÃ³n con try/catch implÃ­cito
       _sub = Geolocator.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.best,
@@ -54,11 +54,11 @@ class UbicacionCadeteService {
             },
           });
         } catch (e) {
-          // Podés loguear el error si querés, pero nunca crashear
+          // PodÃ©s loguear el error si querÃ©s, pero nunca crashear
         }
       });
     } catch (e) {
-      // Cualquier error inesperado en iOS / iPadOS queda atrapado acá
+      // Cualquier error inesperado en iOS / iPadOS queda atrapado acÃ¡
       // y NO tumba la app.
     }
   }
@@ -68,3 +68,4 @@ class UbicacionCadeteService {
     _sub = null;
   }
 }
+

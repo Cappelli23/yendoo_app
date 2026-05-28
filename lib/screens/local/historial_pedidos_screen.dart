@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -25,6 +25,22 @@ class _HistorialPedidosScreenState extends State<HistorialPedidosScreen> {
         .limit(200)
         .snapshots();
   }
+
+  // ===== helpers robustos =====
+  double _asDouble(dynamic v, {double def = 0}) {
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? def;
+    return def;
+  }
+
+  /// ✅ 0.1 km EXACTO (ceil a 0.1 para no “bajar” nunca)
+  double _kmUp01(double km) {
+    if (km <= 0) return 0;
+    return ((km * 10).ceil()) / 10.0;
+  }
+  // ===========================
 
   @override
   Widget build(BuildContext context) {
@@ -68,12 +84,36 @@ class _HistorialPedidosScreenState extends State<HistorialPedidosScreen> {
               final widgetsPedidos = pedidos.map((doc) {
                 final data = doc.data() as Map<String, dynamic>;
                 final fecha = (data['fecha'] as Timestamp?)?.toDate();
-                final distancia = (data['distancia'] ?? 0).toDouble();
-                final montoTotal = (data['montoTotal'] ?? 0).toDouble();
+
+                // ✅ DISTANCIA MOSTRABLE (preferencia: distanciaKmMostrable)
+                final distanciaMost =
+                    _asDouble(data['distanciaKmMostrable'], def: 0);
+                final distanciaLegacy = _asDouble(data['distancia'], def: 0);
+
+                final distanciaParaMostrar =
+                    distanciaMost > 0 ? distanciaMost : distanciaLegacy;
+
+                // ✅ TARIFA EXACTA (0.1 km), sin 0.5
+                // 1) Si está guardada en historial: kmTarifaLocal
+                // 2) Si no está: usar la distancia mostrable
+                double kmTarifaLocal = _asDouble(data['kmTarifaLocal'], def: 0);
+
+                if (kmTarifaLocal <= 0) {
+                  kmTarifaLocal = distanciaParaMostrar;
+                }
+
+                // ✅ Evitar “bajar”: subimos a 0.1 con ceil
+                if (kmTarifaLocal > 0) {
+                  kmTarifaLocal = _kmUp01(kmTarifaLocal);
+                }
+
+                // ✅ MONTO (preferencia: montoTotal guardado)
+                double montoTotal = _asDouble(data['montoTotal'], def: 0);
+
                 totalDia += montoTotal;
 
-                final cliente = data['cliente'] ?? 'Cliente';
-                final cadete = data['cadeteNombre'] ?? 'Cadete';
+                final cliente = (data['cliente'] ?? 'Cliente').toString();
+                final cadete = (data['cadeteNombre'] ?? 'Cadete').toString();
 
                 return ListTile(
                   leading: const Icon(Icons.receipt_long),
@@ -82,7 +122,13 @@ class _HistorialPedidosScreenState extends State<HistorialPedidosScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Entregado por: $cadete'),
-                      Text('Distancia: ${distancia.toStringAsFixed(1)} km'),
+                      Text(
+                        'Distancia: ${distanciaParaMostrar.toStringAsFixed(1)} km',
+                      ),
+                      Text(
+                        'Tarifa: ${kmTarifaLocal.toStringAsFixed(1)} km',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
                       if (fecha != null)
                         Text('Hora: ${DateFormat('HH:mm').format(fecha)}'),
                     ],
@@ -96,7 +142,7 @@ class _HistorialPedidosScreenState extends State<HistorialPedidosScreen> {
 
               return ExpansionTile(
                 title: Text(
-                  '📅 $fechaBonita – Total: \$${totalDia.toStringAsFixed(0)} – Pedidos: ${pedidos.length}',
+                  '📅 $fechaBonita - Total: \$${totalDia.toStringAsFixed(0)} - Pedidos: ${pedidos.length}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 children: widgetsPedidos,

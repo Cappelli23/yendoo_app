@@ -1,11 +1,11 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 class LocalFABButtons extends StatelessWidget {
   final bool buttonsVisible;
   final void Function(String action) onPressed;
 
   const LocalFABButtons({
-    super.key, // ✅ super parameter usado aquí
+    super.key, // âœ… super parameter usado aquÃ­
     required this.buttonsVisible,
     required this.onPressed,
   });
@@ -52,3 +52,4 @@ class LocalFABButtons extends StatelessWidget {
     );
   }
 }
+
