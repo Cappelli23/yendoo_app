@@ -23,7 +23,7 @@ workflows:
         script: xcode-project use-profiles
 
       - name: Build iOS IPA
-        script: flutter build ipa --release -t lib/main.dart
+        script: flutter build ipa --release -t lib/main.dart --export-options-plist=/Users/builder/export_options.plist
 
       - name: Find IPA
         script: |
