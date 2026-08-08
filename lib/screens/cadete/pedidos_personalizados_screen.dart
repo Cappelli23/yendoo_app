@@ -67,11 +67,149 @@ class _PedidosPersonalizadosScreenState
   static const _estadoListo = 'listo';
   static const _estadoEntregadoLegacy = 'entregado';
 
-  // ✅ Regla única: total = cadete + 5
-  static const int _gananciaYendo = 5;
+  // ✅ Regla única: total = cadete + 15
+  static const int _gananciaYendo = 15;
 
-  static const String _mapStyle =
-      'https://api.maptiler.com/maps/openstreetmap/style.json?key=jKh3fbz0oFEuYjlFsboz';
+  static const String _mapStyle = '''
+{
+  "version": 8,
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  "sources": {
+    "yendo": {
+      "type": "vector",
+      "url": "pmtiles://https://yendo-mapa.luisilva17lccs.workers.dev/uruguay.pmtiles"
+    }
+  },
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#f7f7f3" } },
+
+    {
+      "id": "landcover",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "landcover",
+      "paint": {
+        "fill-color": ["match", ["get", "class"], "wood", "#b8dca4", "forest", "#b8dca4", "grass", "#cfe8b8", "farmland", "#d7e8b8", "#d8edc8"],
+        "fill-opacity": 0.75
+      }
+    },
+
+    {
+      "id": "landuse",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "landuse",
+      "paint": {
+        "fill-color": ["match", ["get", "class"], "residential", "#e2e2e2", "commercial", "#ead1dc", "retail", "#ead1dc", "industrial", "#d9c7b0", "school", "#f3dddd", "hospital", "#f3dddd", "cemetery", "#d6e4c6", "park", "#b9df9b", "#e2e2e2"],
+        "fill-opacity": 0.92
+      }
+    },
+
+    { "id": "parks", "type": "fill", "source": "yendo", "source-layer": "park", "paint": { "fill-color": "#b9df9b", "fill-opacity": 0.95 } },
+    { "id": "water", "type": "fill", "source": "yendo", "source-layer": "water", "paint": { "fill-color": "#9fd5f2" } },
+
+    {
+      "id": "buildings",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "building",
+      "minzoom": 13,
+      "paint": {
+        "fill-color": "#d0d0d0",
+        "fill-outline-color": "#b5b5b5",
+        "fill-opacity": 0.95
+      }
+    },
+
+    {
+      "id": "roads-border",
+      "type": "line",
+      "source": "yendo",
+      "source-layer": "transportation",
+      "paint": {
+        "line-color": "#aaaaaa",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.7, 13, 2.8, 15, 5.5, 17, 10.5]
+      }
+    },
+
+    {
+      "id": "roads-main",
+      "type": "line",
+      "source": "yendo",
+      "source-layer": "transportation",
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.4, 13, 1.8, 15, 4.2, 17, 8.5]
+      }
+    },
+
+    {
+      "id": "road-names",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "transportation_name",
+      "minzoom": 13,
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": ["get", "name:latin"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 13, 11, 15, 15, 17, 19],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false,
+        "text-ignore-placement": false
+      },
+      "paint": { "text-color": "#222222", "text-halo-color": "#ffffff", "text-halo-width": 2 }
+    },
+
+    {
+      "id": "housenumbers",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "housenumber",
+      "minzoom": 16,
+      "layout": {
+        "text-field": ["get", "housenumber"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 16, 9, 17, 10, 19, 13],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false
+      },
+      "paint": { "text-color": "#555555", "text-halo-color": "#ffffff", "text-halo-width": 1.2 }
+    },
+
+    {
+      "id": "poi-labels",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "poi",
+      "minzoom": 14,
+      "layout": {
+        "text-field": ["coalesce", ["get", "name"], ["get", "name:latin"]],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 16, 13, 18, 15],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false
+      },
+      "paint": {
+        "text-color": "#8b1e3f",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2
+      }
+    },
+
+    {
+      "id": "place-names",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "place",
+      "minzoom": 5,
+      "layout": {
+        "text-field": ["get", "name:latin"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 5, 11, 10, 14, 14, 18],
+        "text-font": ["Noto Sans Regular"]
+      },
+      "paint": { "text-color": "#333333", "text-halo-color": "#ffffff", "text-halo-width": 1.7 }
+    }
+  ]
+}
+''';
 
   Future<void> _irAZoom(double zoom) async {
     await _mapLibreController?.animateCamera(
@@ -96,13 +234,10 @@ class _PedidosPersonalizadosScreenState
     return null;
   }
 
-  // ✅ fuerza distancia mostrable a 1 decimal: 1.27 -> 1.3, 1 -> 1.0
-  double _to1Decimal(double km) => double.parse(km.toStringAsFixed(1));
-
-  double? _to1DecimalNullable(dynamic v) {
-    final d = _toDouble(v);
-    if (d == null) return null;
-    return _to1Decimal(d);
+  // ✅ sube al próximo 0.1 para no bajar nunca: 1.01 -> 1.1
+  double _kmUp01(double km) {
+    if (km <= 0) return 0;
+    return ((km * 10).ceil()) / 10.0;
   }
 
   @override
@@ -264,39 +399,6 @@ class _PedidosPersonalizadosScreenState
       }
     } catch (_) {}
 
-    // Limitar activos del cadete (aceptado o entregado_al_cadete)
-    final activos = await FirebaseFirestore.instance
-        .collection('pedidosEnCurso')
-        .where('idCadete', isEqualTo: cadete.uid)
-        .where('estado',
-            whereIn: [_estadoAceptado, _estadoEntregadoAlCadete]).get();
-
-    final mismos = activos.docs
-        .where((d) => d.data()['idLocal']?.toString() == _selLocalId)
-        .length;
-
-    final otrosLocales =
-        activos.docs.map((d) => d.data()['idLocal']?.toString() ?? '').toSet();
-
-    if (otrosLocales.isNotEmpty &&
-        _selLocalId != null &&
-        !otrosLocales.contains(_selLocalId)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'No puedes aceptar pedidos de otro local hasta terminar los actuales.'),
-      ));
-      return;
-    }
-
-    // ✅ hasta 4 del mismo local
-    if (mismos >= 4) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Ya aceptaste 4.')));
-      return;
-    }
-
     final ref =
         FirebaseFirestore.instance.collection('pedidosEnCurso').doc(_selId!);
 
@@ -315,10 +417,14 @@ class _PedidosPersonalizadosScreenState
           throw Exception('El pedido ya fue aceptado por otro cadete.');
         }
 
-        // ✅ EXACTITUD: usar lo guardado por el Local (NO recalcular)
-        final kmMost = _to1DecimalNullable(data['distanciaKmMostrable']);
-        final kmReal = _toDouble(data['distanciaKmReal']) ??
+        // ✅ EXACTITUD: usar lo guardado por el Local,
+        // pero si existe distancia real, usarla para no bajar el decimal.
+        final kmMost = _toDouble(data['distanciaKmMostrable']) ??
+            _toDouble(data['kmTarifaCadete']) ??
+            _toDouble(data['kmTarifaLocal']) ??
             _toDouble(data['distancia_km']);
+
+        final kmReal = kmMost;
 
         int? montoCad = _toInt(data['montoCadete']);
         int? montoTot = _toInt(data['montoTotal']);
@@ -353,6 +459,8 @@ class _PedidosPersonalizadosScreenState
 
           // ✅ blindaje final exacto
           'distanciaKmMostrable': kmMost,
+          'kmTarifaCadete': kmMost,
+          'kmTarifaLocal': kmMost,
           if (kmReal != null) 'distanciaKmReal': kmReal,
           'montoCadete': montoCad,
           'montoTotal': montoTot,
@@ -436,12 +544,17 @@ class _PedidosPersonalizadosScreenState
           throw Exception('El pedido todavía no está listo para entregar.');
         }
 
-        // ✅ NO recalcular: usar guardado, pero forzar mostrable a 1 decimal
-        final kmMost = _to1DecimalNullable(
-          pedidoData['distanciaKmMostrable'] ?? pedidoData['distancia_km'],
-        );
+        // ✅ NO recalcular monto: usar lo guardado.
+        // Para kilómetros, usar la distancia real si existe y subir a 0.1
+        // para que 1.01 km no termine mostrado/guardado como 1.0 km.
         final kmReal = _toDouble(pedidoData['distanciaKmReal']) ??
             _toDouble(pedidoData['distancia_km']);
+
+        final kmBase = kmReal ??
+            _toDouble(pedidoData['distanciaKmMostrable']) ??
+            _toDouble(pedidoData['distancia_km']);
+
+        final kmMost = kmBase == null ? null : _kmUp01(kmBase);
 
         int? montoCad = _toInt(pedidoData['montoCadete']);
         int? montoTot = _toInt(pedidoData['montoTotal']);
@@ -494,6 +607,8 @@ class _PedidosPersonalizadosScreenState
 
             // ✅ exactitud guardada: mostrable siempre 1 decimal
             'distanciaKmMostrable': kmMost,
+            'kmTarifaCadete': kmMost,
+            'kmTarifaLocal': kmMost,
             if (kmReal != null) 'distanciaKmReal': kmReal,
 
             'montoTotal': montoTot,
@@ -512,6 +627,7 @@ class _PedidosPersonalizadosScreenState
             'cliente': clientePedido,
             'distancia': kmMost,
             'distanciaKmMostrable': kmMost,
+            'kmTarifaLocal': kmMost,
             if (kmReal != null) 'distanciaKmReal': kmReal,
             'montoTotal': montoTot,
             'montoGananciaAdmin': _gananciaYendo,
@@ -529,6 +645,7 @@ class _PedidosPersonalizadosScreenState
             'cliente': clientePedido,
             'distancia': kmMost,
             'distanciaKmMostrable': kmMost,
+            'kmTarifaCadete': kmMost,
             if (kmReal != null) 'distanciaKmReal': kmReal,
             'montoCadete': montoCad,
             'fecha': now,
@@ -952,6 +1069,17 @@ class _PedidosPersonalizadosScreenState
                                 icon: const Icon(Icons.store),
                                 label: const Text('Ir al local'),
                               ),
+                            if (puedeLlamarLocal)
+                              ElevatedButton.icon(
+                                onPressed: () =>
+                                    _llamarTelefono(_selTelefonoLocal!),
+                                icon: const Icon(Icons.phone),
+                                label: const Text('Llamar al local'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
                             if (puedeComenzar)
                               ElevatedButton.icon(
                                 onPressed: () =>
@@ -962,19 +1090,20 @@ class _PedidosPersonalizadosScreenState
                             if (puedeEntregar)
                               ElevatedButton.icon(
                                 onPressed: _entregando ? null : _entregar,
-                                icon: const Icon(Icons.local_shipping),
+                                icon: const Icon(Icons.moped),
                                 label: Text(
                                   _entregando ? 'Entregando...' : 'Entregar',
                                 ),
                               ),
-                            if (puedeLlamarLocal)
+                            if (esMio &&
+                                (_selTelefonoCliente ?? '').trim().isNotEmpty)
                               ElevatedButton.icon(
                                 onPressed: () =>
-                                    _llamarTelefono(_selTelefonoLocal!),
+                                    _llamarTelefono(_selTelefonoCliente!),
                                 icon: const Icon(Icons.phone),
-                                label: const Text('Llamar al local'),
+                                label: const Text('Llamar al cliente'),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
+                                  backgroundColor: Colors.blue,
                                   foregroundColor: Colors.white,
                                 ),
                               ),

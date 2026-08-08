@@ -7,7 +7,7 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 
 	<key>CFBundleDisplayName</key>
-	<string>Yendoo App</string>
+	<string>Yendo Cadetes</string>
 
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
@@ -64,23 +64,24 @@
 	<true/>
 
 	<!-- ============================== -->
-	<!--      UBICACIÓN - REQUERIDO    -->
+	<!--           UBICACIÓN           -->
 	<!-- ============================== -->
 
-	<!-- Ya lo tenías -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Yendoo utiliza tu ubicación cuando estás usando la app para mostrar tu posición en el mapa, calcular distancias y asignarte o mostrarte cadetes y locales cercanos durante los envíos.</string>
+	<string>Yendo utiliza tu ubicación mientras usás la app para mostrar tu posición, calcular distancias y gestionar los envíos.</string>
 
-	<!-- Ya lo tenías -->
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Yendoo puede seguir usando tu ubicación mientras realizas un envío, incluso si cambias de app, para actualizar el mapa en tiempo real y permitir que locales y cadetes vean el progreso de la entrega.</string>
+	<string>Yendo utiliza tu ubicación durante una entrega, incluso cuando la app está en segundo plano, para actualizar el progreso del envío.</string>
 
-	<!-- ESTAS DOS FALTABAN y eran la causa del CRASH -->
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Yendoo necesita acceso continuo a tu ubicación para funcionar correctamente durante los envíos y mostrar tu progreso en tiempo real.</string>
+	<!-- ============================== -->
+	<!--      MODOS EN SEGUNDO PLANO   -->
+	<!-- ============================== -->
 
-	<key>NSLocationUsageDescription</key>
-	<string>La app requiere acceso a tu ubicación para mostrarte en el mapa y permitir el funcionamiento del sistema de envíos.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
 
 </dict>
 </plist>

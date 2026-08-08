@@ -1,4 +1,4 @@
-# Plataforma mínima para iOS (requerida por cloud_firestore, firebase_auth, etc.)
+# Plataforma mínima para iOS
 platform :ios, '15.0'
 
 # Desactivar estadísticas de CocoaPods
@@ -12,7 +12,8 @@ project 'Runner', {
 
 def flutter_root
   generated_xcode_build_settings_path = File.expand_path(
-    File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__
+    File.join('..', 'Flutter', 'Generated.xcconfig'),
+    __FILE__
   )
 
   unless File.exist?(generated_xcode_build_settings_path)
@@ -20,16 +21,18 @@ def flutter_root
   end
 
   File.foreach(generated_xcode_build_settings_path) do |line|
-    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    matches = line.match(/FLUTTER_ROOT=(.*)/)
     return matches[1].strip if matches
   end
 
   raise "FLUTTER_ROOT not found in Generated.xcconfig. Try deleting Generated.xcconfig, then run `flutter pub get`."
 end
 
-require File.expand_path('packages/flutter_tools/bin/podhelper.rb', flutter_root)
+require File.expand_path(
+  'packages/flutter_tools/bin/podhelper.rb',
+  flutter_root
+)
 
-# Necesario para la nueva integración de Flutter con CocoaPods
 flutter_ios_podfile_setup
 
 target 'Runner' do
@@ -41,12 +44,21 @@ end
 
 post_install do |installer|
   installer.pods_project.targets.each do |target|
-    # 👇 ESTA ES LA FUNCIÓN CORRECTA PARA CONFIGURAR LOS TARGETS
+
     flutter_additional_ios_build_settings(target)
 
-    # Evitar problemas con simulador arm64
     target.build_configurations.each do |config|
-      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
+
+      # Permisos usados por permission_handler
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
+        '$(inherited)',
+
+        # Ubicación
+        'PERMISSION_LOCATION=1',
+
+        # Notificaciones
+        'PERMISSION_NOTIFICATIONS=1',
+      ]
     end
   end
 end

@@ -17,19 +17,147 @@ class VerCadetesScreen extends StatefulWidget {
 
 class _VerCadetesScreenState extends State<VerCadetesScreen> {
   maplibre.MapLibreMapController? _mapLibreController;
-
   bool _mapStyleLoaded = false;
 
-  static const String _mapStyle =
-      'https://api.maptiler.com/maps/openstreetmap/style.json?key=jKh3fbz0oFEuYjlFsboz';
+  static const String _mapStyle = '''
+{
+  "version": 8,
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  "sources": {
+    "yendo": {
+      "type": "vector",
+      "url": "pmtiles://https://yendo-mapa.luisilva17lccs.workers.dev/uruguay.pmtiles"
+    }
+  },
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#f7f7f3" } },
+    {
+      "id": "landcover",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "landcover",
+      "paint": {
+        "fill-color": ["match", ["get", "class"], "wood", "#b8dca4", "forest", "#b8dca4", "grass", "#cfe8b8", "farmland", "#d7e8b8", "#d8edc8"],
+        "fill-opacity": 0.75
+      }
+    },
+    {
+      "id": "landuse",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "landuse",
+      "paint": {
+        "fill-color": ["match", ["get", "class"], "residential", "#e2e2e2", "commercial", "#ead1dc", "retail", "#ead1dc", "industrial", "#d9c7b0", "school", "#f3dddd", "hospital", "#f3dddd", "cemetery", "#d6e4c6", "park", "#b9df9b", "#e2e2e2"],
+        "fill-opacity": 0.92
+      }
+    },
+    { "id": "parks", "type": "fill", "source": "yendo", "source-layer": "park", "paint": { "fill-color": "#b9df9b", "fill-opacity": 0.95 } },
+    { "id": "water", "type": "fill", "source": "yendo", "source-layer": "water", "paint": { "fill-color": "#9fd5f2" } },
+    {
+      "id": "buildings",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "building",
+      "minzoom": 13,
+      "paint": {
+        "fill-color": "#d0d0d0",
+        "fill-outline-color": "#b5b5b5",
+        "fill-opacity": 0.95
+      }
+    },
+    {
+      "id": "roads-border",
+      "type": "line",
+      "source": "yendo",
+      "source-layer": "transportation",
+      "paint": {
+        "line-color": "#aaaaaa",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.7, 13, 2.8, 15, 5.5, 17, 10.5]
+      }
+    },
+    {
+      "id": "roads-main",
+      "type": "line",
+      "source": "yendo",
+      "source-layer": "transportation",
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.4, 13, 1.8, 15, 4.2, 17, 8.5]
+      }
+    },
+    {
+      "id": "road-names",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "transportation_name",
+      "minzoom": 13,
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": ["get", "name:latin"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 13, 11, 15, 15, 17, 19],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false,
+        "text-ignore-placement": false
+      },
+      "paint": { "text-color": "#222222", "text-halo-color": "#ffffff", "text-halo-width": 2 }
+    },
+    {
+      "id": "housenumbers",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "housenumber",
+      "minzoom": 16,
+      "layout": {
+        "text-field": ["get", "housenumber"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 16, 9, 17, 10, 19, 13],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false
+      },
+      "paint": { "text-color": "#555555", "text-halo-color": "#ffffff", "text-halo-width": 1.2 }
+    },
+    {
+      "id": "poi-labels",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "poi",
+      "minzoom": 14,
+      "layout": {
+        "text-field": ["coalesce", ["get", "name"], ["get", "name:latin"]],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 16, 13, 18, 15],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false
+      },
+      "paint": {
+        "text-color": "#8b1e3f",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2
+      }
+    },
+    {
+      "id": "place-names",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "place",
+      "minzoom": 5,
+      "layout": {
+        "text-field": ["get", "name:latin"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 5, 11, 10, 14, 14, 18],
+        "text-font": ["Noto Sans Regular"]
+      },
+      "paint": { "text-color": "#333333", "text-halo-color": "#ffffff", "text-halo-width": 1.7 }
+    }
+  ]
+}
+''';
 
   LatLng? _localPos;
 
   final List<Map<String, dynamic>> _cadetes = [];
-
   final List<String> _favoritos = [];
 
   final List<maplibre.Symbol> _symbols = [];
+  final List<maplibre.Circle> _cadeteCircles = [];
+  final Map<maplibre.Circle, Map<String, dynamic>> _circleCadetes = {};
 
   @override
   void initState() {
@@ -71,9 +199,7 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
       setState(() {
         _favoritos
           ..clear()
-          ..addAll(
-            raw.whereType<String>(),
-          );
+          ..addAll(raw.whereType<String>());
       });
 
       await _dibujarMarkers();
@@ -84,19 +210,13 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
     final ref =
         FirebaseFirestore.instance.collection('usuarios').doc(widget.localId);
 
-    final doc = await ref.get();
+    final esFavorito = _favoritos.contains(idCad);
 
-    List<dynamic> favs = doc.data()?['cadetesFavoritos'] ?? [];
-
-    final esFavorito = favs.contains(idCad);
-
-    if (!esFavorito && favs.length >= 8) {
+    if (!esFavorito && _favoritos.length >= 8) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Máximo 8 cadetes favoritos alcanzado',
-            ),
+            content: Text('Máximo 8 cadetes favoritos alcanzado'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -104,16 +224,24 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
       return;
     }
 
-    esFavorito ? favs.remove(idCad) : favs.add(idCad);
-
-    await ref.update({
-      'cadetesFavoritos': favs,
-    });
+    if (esFavorito) {
+      await ref.update({
+        'cadetesFavoritos': FieldValue.arrayRemove([idCad]),
+      });
+    } else {
+      await ref.update({
+        'cadetesFavoritos': FieldValue.arrayUnion([idCad]),
+      });
+    }
 
     if (!mounted) return;
 
     setState(() {
-      esFavorito ? _favoritos.remove(idCad) : _favoritos.add(idCad);
+      if (esFavorito) {
+        _favoritos.remove(idCad);
+      } else {
+        _favoritos.add(idCad);
+      }
     });
 
     await _dibujarMarkers();
@@ -136,20 +264,24 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
     FirebaseFirestore.instance
         .collection('usuarios')
         .where('rol', isEqualTo: 'cadete')
-        .where('ubicacion', isNotEqualTo: null)
         .snapshots()
         .listen((snap) async {
-      final lista = snap.docs
-          .map(
-            (d) => {
-              'id': d.id,
-              'nombre': d['nombre'] ?? 'Cadete',
-              'telefono': d['telefono'] ?? '',
-              'mostrarTelefono': d['mostrarNumero'] == true,
-              'ubicacion': d['ubicacion'],
-            },
-          )
-          .toList();
+      debugPrint('Cadetes encontrados: ${snap.docs.length}');
+
+      final lista = snap.docs.where((d) {
+        final data = d.data();
+        return data['ubicacion'] != null;
+      }).map((d) {
+        final data = d.data();
+
+        return {
+          'id': d.id,
+          'nombre': data['nombre'] ?? 'Cadete',
+          'telefono': data['telefono'] ?? '',
+          'mostrarTelefono': data['mostrarNumero'] == true,
+          'ubicacion': data['ubicacion'],
+        };
+      }).toList();
 
       if (!mounted) return;
 
@@ -165,7 +297,6 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
 
   Future<void> _limpiarMarkers() async {
     final map = _mapLibreController;
-
     if (map == null) return;
 
     for (final s in List<maplibre.Symbol>.from(_symbols)) {
@@ -174,7 +305,15 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
       } catch (_) {}
     }
 
+    for (final c in List<maplibre.Circle>.from(_cadeteCircles)) {
+      try {
+        await map.removeCircle(c);
+      } catch (_) {}
+    }
+
     _symbols.clear();
+    _cadeteCircles.clear();
+    _circleCadetes.clear();
   }
 
   Future<void> _dibujarMarkers() async {
@@ -186,7 +325,6 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
 
     await _limpiarMarkers();
 
-    // 🏪 LOCAL
     final localSymbol = await map.addSymbol(
       maplibre.SymbolOptions(
         geometry: maplibre.LatLng(
@@ -201,10 +339,8 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
 
     _symbols.add(localSymbol);
 
-    // 🛵 CADETES
     for (final cad in _cadetes) {
       final loc = cad['ubicacion'];
-
       if (loc == null) continue;
 
       final pos = LatLng(
@@ -212,58 +348,43 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
         (loc['lng'] as num).toDouble(),
       );
 
-      final esFav = _favoritos.contains(
-        cad['id'],
-      );
+      final esFav = _favoritos.contains(cad['id']);
 
-      final symbol = await map.addSymbol(
-        maplibre.SymbolOptions(
+      final circle = await map.addCircle(
+        maplibre.CircleOptions(
           geometry: maplibre.LatLng(
             pos.latitude,
             pos.longitude,
           ),
-
-          // 🛵 marker
-          textField: '🛵',
-
-          textSize: 28,
-
-          textColor: esFav ? '#FF0000' : '#00AA00',
-
-          textAnchor: 'center',
+          circleColor: esFav ? '#FF0000' : '#00AA00',
+          circleRadius: 11,
+          circleStrokeColor: '#FFFFFF',
+          circleStrokeWidth: 3,
         ),
       );
 
-      _symbols.add(symbol);
+      _cadeteCircles.add(circle);
+      _circleCadetes[circle] = cad;
     }
   }
 
   void _mostrarInfo(Map<String, dynamic> cad) {
-    final esFav = _favoritos.contains(
-      cad['id'],
-    );
+    final esFav = _favoritos.contains(cad['id']);
 
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(
-          cad['nombre'],
-        ),
+        title: Text(cad['nombre']),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (cad['mostrarTelefono'] == true)
-              Text(
-                'Teléfono: ${cad['telefono']}',
-              ),
+              Text('Teléfono: ${cad['telefono']}'),
             const SizedBox(height: 10),
             ElevatedButton.icon(
               onPressed: () {
                 Navigator.pop(context);
-
-                _alternarFavorito(
-                  cad['id'],
-                );
+                _alternarFavorito(cad['id']);
               },
               icon: Icon(
                 esFav ? Icons.favorite : Icons.favorite_border,
@@ -281,7 +402,6 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
               ),
               onPressed: () {
                 Navigator.pop(context);
-
                 Navigator.pop(
                   context,
                   {
@@ -291,9 +411,7 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
                 );
               },
               icon: const Icon(Icons.check),
-              label: const Text(
-                'Seleccionar para pedido',
-              ),
+              label: const Text('Seleccionar para pedido'),
             ),
           ],
         ),
@@ -306,18 +424,14 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
     if (_localPos == null) {
       return const Scaffold(
         body: Center(
-          child: Text(
-            'Sin ubicación del local',
-          ),
+          child: Text('Sin ubicación del local'),
         ),
       );
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Cadetes disponibles',
-        ),
+        title: const Text('Cadetes disponibles'),
       ),
       body: maplibre.MapLibreMap(
         styleString: _mapStyle,
@@ -336,19 +450,11 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
         onMapCreated: (controller) {
           _mapLibreController = controller;
 
-          controller.onSymbolTapped.add((symbol) {
-            final index = _symbols.indexOf(
-              symbol,
-            );
-
-            // El primero es el local
-            if (index <= 0) return;
-
-            final cadete = _cadetes[index - 1];
-
-            _mostrarInfo(
-              cadete,
-            );
+          controller.onCircleTapped.add((circle) {
+            final cadete = _circleCadetes[circle];
+            if (cadete != null) {
+              _mostrarInfo(cadete);
+            }
           });
         },
         onStyleLoadedCallback: () async {

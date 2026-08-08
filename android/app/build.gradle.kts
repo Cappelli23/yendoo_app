@@ -23,11 +23,11 @@ android {
     defaultConfig {
         applicationId = "com.yendoo_app"           // ⚠️ no cambiar
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
 
         // ⬆️ Subí la versión para la actualización
-        versionCode = 116                           // ← mayor que 102
-        versionName = "1.0.5"
+        versionCode = 119                           // ← mayor que 102
+        versionName = "1.0.8"
 
         multiDexEnabled = true
     }

@@ -2,7 +2,7 @@
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:maplibre_gl/maplibre_gl.dart' as maplibre;
 
 import 'screens/local/historial_pedidos_screen.dart';
@@ -27,14 +27,151 @@ class _LocalDashboardState extends State<LocalDashboard> {
 
   final List<maplibre.Symbol> _symbols = [];
 
-  static const String _mapStyle =
-      'https://api.maptiler.com/maps/openstreetmap/style.json?key=jKh3fbz0oFEuYjlFsboz';
+  static const String _mapStyle = '''
+{
+  "version": 8,
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  "sources": {
+    "yendo": {
+      "type": "vector",
+      "url": "pmtiles://https://yendo-mapa.luisilva17lccs.workers.dev/uruguay.pmtiles"
+    }
+  },
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#f7f7f3" } },
+
+    {
+      "id": "landcover",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "landcover",
+      "paint": {
+        "fill-color": ["match", ["get", "class"], "wood", "#b8dca4", "forest", "#b8dca4", "grass", "#cfe8b8", "farmland", "#d7e8b8", "#d8edc8"],
+        "fill-opacity": 0.75
+      }
+    },
+
+    {
+      "id": "landuse",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "landuse",
+      "paint": {
+        "fill-color": ["match", ["get", "class"], "residential", "#e2e2e2", "commercial", "#ead1dc", "retail", "#ead1dc", "industrial", "#d9c7b0", "school", "#f3dddd", "hospital", "#f3dddd", "cemetery", "#d6e4c6", "park", "#b9df9b", "#e2e2e2"],
+        "fill-opacity": 0.92
+      }
+    },
+
+    { "id": "parks", "type": "fill", "source": "yendo", "source-layer": "park", "paint": { "fill-color": "#b9df9b", "fill-opacity": 0.95 } },
+    { "id": "water", "type": "fill", "source": "yendo", "source-layer": "water", "paint": { "fill-color": "#9fd5f2" } },
+
+    {
+      "id": "buildings",
+      "type": "fill",
+      "source": "yendo",
+      "source-layer": "building",
+      "minzoom": 13,
+      "paint": {
+        "fill-color": "#d0d0d0",
+        "fill-outline-color": "#b5b5b5",
+        "fill-opacity": 0.95
+      }
+    },
+
+    {
+      "id": "roads-border",
+      "type": "line",
+      "source": "yendo",
+      "source-layer": "transportation",
+      "paint": {
+        "line-color": "#aaaaaa",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.7, 13, 2.8, 15, 5.5, 17, 10.5]
+      }
+    },
+
+    {
+      "id": "roads-main",
+      "type": "line",
+      "source": "yendo",
+      "source-layer": "transportation",
+      "paint": {
+        "line-color": "#ffffff",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 0.4, 13, 1.8, 15, 4.2, 17, 8.5]
+      }
+    },
+
+    {
+      "id": "road-names",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "transportation_name",
+      "minzoom": 13,
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": ["get", "name:latin"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 13, 11, 15, 15, 17, 19],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false,
+        "text-ignore-placement": false
+      },
+      "paint": { "text-color": "#222222", "text-halo-color": "#ffffff", "text-halo-width": 2 }
+    },
+
+    {
+      "id": "housenumbers",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "housenumber",
+      "minzoom": 16,
+      "layout": {
+        "text-field": ["get", "housenumber"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 16, 9, 17, 10, 19, 13],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false
+      },
+      "paint": { "text-color": "#555555", "text-halo-color": "#ffffff", "text-halo-width": 1.2 }
+    },
+
+    {
+      "id": "poi-labels",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "poi",
+      "minzoom": 14,
+      "layout": {
+        "text-field": ["coalesce", ["get", "name"], ["get", "name:latin"]],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 14, 11, 16, 13, 18, 15],
+        "text-font": ["Noto Sans Regular"],
+        "text-allow-overlap": false
+      },
+      "paint": {
+        "text-color": "#8b1e3f",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 2
+      }
+    },
+
+    {
+      "id": "place-names",
+      "type": "symbol",
+      "source": "yendo",
+      "source-layer": "place",
+      "minzoom": 5,
+      "layout": {
+        "text-field": ["get", "name:latin"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 5, 11, 10, 14, 14, 18],
+        "text-font": ["Noto Sans Regular"]
+      },
+      "paint": { "text-color": "#333333", "text-halo-color": "#ffffff", "text-halo-width": 1.7 }
+    }
+  ]
+}
+''';
 
   @override
   void initState() {
     super.initState();
     _initLocation();
-    _borrarFavoritosAlIniciar();
   }
 
   Future<void> _initLocation() async {
@@ -79,10 +216,6 @@ class _LocalDashboardState extends State<LocalDashboard> {
           _currentPosition = pos;
         });
 
-        // ✅ IMPORTANTE:
-        // NO guardar ubicación actual en Firestore
-        // para no pisar la ubicación fija del local
-
         await _dibujarMarkers();
       });
     } catch (e) {
@@ -105,7 +238,6 @@ class _LocalDashboardState extends State<LocalDashboard> {
 
     _symbols.clear();
 
-    // 🏪 marcador visual del local
     final localMarker = await map.addSymbol(
       maplibre.SymbolOptions(
         geometry: maplibre.LatLng(
@@ -119,26 +251,6 @@ class _LocalDashboardState extends State<LocalDashboard> {
     );
 
     _symbols.add(localMarker);
-  }
-
-  Future<void> _borrarFavoritosAlIniciar() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-
-    if (uid == null) return;
-
-    await FirebaseFirestore.instance.collection('usuarios').doc(uid).update({
-      'cadetesFavoritos': [],
-    });
-  }
-
-  Future<void> _borrarFavoritosAlCerrarSesion() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-
-    if (uid != null) {
-      await FirebaseFirestore.instance.collection('usuarios').doc(uid).update({
-        'cadetesFavoritos': [],
-      });
-    }
   }
 
   void _handleFABAction(String action) async {
@@ -217,8 +329,6 @@ class _LocalDashboardState extends State<LocalDashboard> {
         break;
 
       case "logout":
-        await _borrarFavoritosAlCerrarSesion();
-
         await FirebaseAuth.instance.signOut();
 
         if (!mounted) return;
