@@ -255,7 +255,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
       const Distance().as(LengthUnit.Kilometer, a, b);
 
   // ✅ EXACTITUD mostrable/guardable: 1 decimal
-  double _to1Decimal(double km) => double.parse(km.toStringAsFixed(1));
+  double _to1Decimal(double km) => (km * 10).ceil() / 10.0;
 
   // ✅ fuerza 1 decimal y tipo double (evita que te quede int en Firestore)
   double _as1DecimalDouble(dynamic v, {double def = 0}) {
@@ -667,13 +667,30 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
 
     // nombre real cadete
     String nombreCadete = 'Cadete';
+    String telefonoCadete = '';
+    bool mostrarNumeroCadete = false;
+
     try {
       final cadeteDoc = await FirebaseFirestore.instance
           .collection('usuarios')
           .doc(cadete.uid)
           .get();
-      final n = (cadeteDoc.data()?['nombre'] ?? '').toString().trim();
-      if (n.isNotEmpty) nombreCadete = n;
+
+      final cadeteData = cadeteDoc.data();
+
+      final n = (cadeteData?['nombre'] ?? '').toString().trim();
+      final t = (cadeteData?['telefono'] ?? '').toString().trim();
+      final mostrar = cadeteData?['mostrarNumero'] == true;
+
+      if (n.isNotEmpty) {
+        nombreCadete = n;
+      }
+
+      if (t.isNotEmpty) {
+        telefonoCadete = t;
+      }
+
+      mostrarNumeroCadete = mostrar;
     } catch (_) {}
 
     final ref = FirebaseFirestore.instance
@@ -734,7 +751,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
             );
 
             final kmExact = _kmEntre(origen, destino);
-            final kmMostFallback = _to1Decimal(kmExact);
+            final kmMostFallback = (kmExact * 10).ceil() / 10.0;
             final kmRealFallback = double.parse(kmExact.toStringAsFixed(3));
 
             int baseCadete;
@@ -781,6 +798,8 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
           'asignado': <String, dynamic>{
             'cadeteId': cadete.uid,
             'cadeteNombre': nombreCadete,
+            if (mostrarNumeroCadete && telefonoCadete.isNotEmpty)
+              'cadeteTelefono': telefonoCadete,
           },
           if (montoCadFinal != null) 'montoCadete': montoCadFinal,
           if (montoTotFinal != null) 'montoTotal': montoTotFinal,

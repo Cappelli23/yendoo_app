@@ -212,11 +212,11 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
 
     final esFavorito = _favoritos.contains(idCad);
 
-    if (!esFavorito && _favoritos.length >= 8) {
+    if (!esFavorito && _favoritos.length >= 12) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Máximo 8 cadetes favoritos alcanzado'),
+            content: Text('Máximo 12 cadetes favoritos alcanzado'),
             duration: Duration(seconds: 2),
           ),
         );
@@ -392,7 +392,7 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
               label: Text(
                 esFav
                     ? 'Quitar de favoritos'
-                    : 'Agregar a favoritos (${_favoritos.length}/8)',
+                    : 'Agregar a favoritos (${_favoritos.length}/12)',
               ),
             ),
             const SizedBox(height: 12),

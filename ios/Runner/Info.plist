@@ -83,5 +83,12 @@
 		<string>remote-notification</string>
 	</array>
 
+	<!-- ============================== -->
+	<!--     EXPORT COMPLIANCE / SSL   -->
+	<!-- ============================== -->
+
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+
 </dict>
 </plist>

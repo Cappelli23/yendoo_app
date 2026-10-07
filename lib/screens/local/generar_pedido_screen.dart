@@ -183,7 +183,7 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
 }
 ''';
 
-  double _to1DecimalDouble(double km) => double.parse(km.toStringAsFixed(1));
+  double _to1DecimalDouble(double km) => (km * 10).ceil() / 10.0;
 
   double _as1DecimalDouble(dynamic v, {double def = 0}) {
     if (v == null) return def;

@@ -2,7 +2,7 @@ name: yendoo_app
 description: Aplicación Yendo desde cero
 publish_to: 'none'
 
-version: 1.0.8+119
+version: 1.0.10+122
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

@@ -2,6 +2,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class MisPedidosScreen extends StatefulWidget {
   const MisPedidosScreen({super.key});
@@ -217,6 +218,8 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
               final destino = data['ubicacionDestino'];
               final asignado = (data['asignado'] as Map?) ?? {};
               final cadeteNombre = (asignado['cadeteNombre'] ?? '').toString();
+              final cadeteTelefono =
+                  (asignado['cadeteTelefono'] ?? '').toString().trim();
 
               final estadoTexto = () {
                 switch (estado) {
@@ -254,7 +257,43 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Estado: $estadoTexto'),
+                            if (estado == 'aceptado' &&
+                                cadeteTelefono.isNotEmpty)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Flexible(
+                                    child: Text('Estado: $estadoTexto'),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                      minWidth: 30,
+                                      minHeight: 30,
+                                    ),
+                                    icon: const Icon(
+                                      Icons.phone,
+                                      size: 18,
+                                    ),
+                                    tooltip: 'Llamar al cadete',
+                                    onPressed: () async {
+                                      final telefono = cadeteTelefono
+                                          .replaceAll(RegExp(r'\D'), '');
+
+                                      if (telefono.isEmpty) return;
+
+                                      await launchUrl(
+                                        Uri.parse('tel:$telefono'),
+                                        mode: LaunchMode.externalApplication,
+                                      );
+                                    },
+                                  ),
+                                ],
+                              )
+                            else
+                              Text('Estado: $estadoTexto'),
                             Text('Fecha: $fechaTexto'),
                             Text('Total: \$${montoTotal.toStringAsFixed(0)}'),
 

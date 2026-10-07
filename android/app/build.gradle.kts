@@ -26,8 +26,8 @@ android {
         targetSdk = 36
 
         // ⬆️ Subí la versión para la actualización
-        versionCode = 119                           // ← mayor que 102
-        versionName = "1.0.8"
+        versionCode = 122                           // ← mayor que 102
+        versionName = "1.0.9"
 
         multiDexEnabled = true
     }

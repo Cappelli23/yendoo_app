@@ -90,12 +90,16 @@ class _HistorialPedidosScreenState extends State<HistorialPedidosScreen> {
                     _asDouble(data['distanciaKmMostrable'], def: 0);
                 final distanciaLegacy = _asDouble(data['distancia'], def: 0);
 
-                final distanciaParaMostrar =
+                final distanciaBase =
                     distanciaMost > 0 ? distanciaMost : distanciaLegacy;
 
-                // ✅ TARIFA EXACTA (0.1 km), sin 0.5
-                // 1) Si está guardada en historial: kmTarifaLocal
-                // 2) Si no está: usar la distancia mostrable
+// ✅ Nunca bajar la distancia al mostrarla
+                final distanciaParaMostrar =
+                    distanciaBase > 0 ? _kmUp01(distanciaBase) : 0.0;
+
+// ✅ TARIFA EXACTA (0.1 km), sin 0.5
+// 1) Si está guardada en historial: kmTarifaLocal
+// 2) Si no está: usar la distancia mostrable
                 double kmTarifaLocal = _asDouble(data['kmTarifaLocal'], def: 0);
 
                 if (kmTarifaLocal <= 0) {

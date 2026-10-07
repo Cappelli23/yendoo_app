@@ -179,6 +179,8 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
 
   List<QueryDocumentSnapshot> _docsCadetesFav = [];
 
+  bool _mostrarCadetes = false;
+
   double? _distKm;
   int? _montoTotal;
 
@@ -886,29 +888,77 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
                       ),
                       const SizedBox(height: 12),
                       if (_docsCadetesFav.isNotEmpty)
-                        Wrap(
-                          spacing: 6,
-                          children: _docsCadetesFav.map((cad) {
-                            final id = cad.id;
-
-                            final nombre = cad['nombre'] ?? 'Cadete';
-
-                            final sel = _cadetesElegidos.contains(id);
-
-                            return FilterChip(
-                              label: Text(
-                                nombre,
-                              ),
-                              selected: sel,
-                              onSelected: (v) {
+                        Column(
+                          children: [
+                            InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () {
                                 setState(() {
-                                  v
-                                      ? _cadetesElegidos.add(id)
-                                      : _cadetesElegidos.remove(id);
+                                  _mostrarCadetes = !_mostrarCadetes;
                                 });
                               },
-                            );
-                          }).toList(),
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.delivery_dining,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Cadetes agregados (${_docsCadetesFav.length}/12)',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    Icon(
+                                      _mostrarCadetes
+                                          ? Icons.keyboard_arrow_up
+                                          : Icons.keyboard_arrow_down,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (_mostrarCadetes) ...[
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: _docsCadetesFav.map((cad) {
+                                  final id = cad.id;
+                                  final nombre = cad['nombre'] ?? 'Cadete';
+                                  final sel = _cadetesElegidos.contains(id);
+
+                                  return FilterChip(
+                                    label: Text(nombre),
+                                    selected: sel,
+                                    onSelected: (v) {
+                                      setState(() {
+                                        v
+                                            ? _cadetesElegidos.add(id)
+                                            : _cadetesElegidos.remove(id);
+                                      });
+                                    },
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ],
                         ),
                       const SizedBox(height: 12),
                       if (_distKm != null && _montoTotal != null)

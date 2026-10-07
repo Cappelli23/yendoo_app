@@ -388,15 +388,30 @@ class _PedidosPersonalizadosScreenState
 
     // ✅ nombre real cadete desde Firestore
     String nombreCadete = 'Cadete';
+    String telefonoCadete = '';
+    bool mostrarNumeroCadete = false;
+
     try {
       final cadeteDoc = await FirebaseFirestore.instance
           .collection('usuarios')
           .doc(cadete.uid)
           .get();
-      final n = (cadeteDoc.data()?['nombre'] ?? '').toString().trim();
+
+      final cadeteData = cadeteDoc.data();
+
+      final n = (cadeteData?['nombre'] ?? '').toString().trim();
+      final t = (cadeteData?['telefono'] ?? '').toString().trim();
+      final mostrar = cadeteData?['mostrarNumero'] == true;
+
       if (n.isNotEmpty) {
         nombreCadete = n;
       }
+
+      if (t.isNotEmpty) {
+        telefonoCadete = t;
+      }
+
+      mostrarNumeroCadete = mostrar;
     } catch (_) {}
 
     final ref =
@@ -455,6 +470,8 @@ class _PedidosPersonalizadosScreenState
           'asignado': {
             'cadeteId': cadete.uid,
             'cadeteNombre': nombreCadete,
+            if (mostrarNumeroCadete && telefonoCadete.isNotEmpty)
+              'cadeteTelefono': telefonoCadete,
           },
 
           // ✅ blindaje final exacto
