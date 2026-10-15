@@ -697,30 +697,78 @@ class _PedidosPersonalizadosScreenState
 
   // ✅ Botón "Comenzar" -> abre Google Maps normal (solo Android)
   Future<void> _comenzarGoogleMaps(LatLng destino) async {
-    if (!Platform.isAndroid) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Navegación disponible solo en Android')),
-      );
-      return;
-    }
-
     final lat = destino.latitude;
     final lng = destino.longitude;
 
-    final native = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
     final web = Uri.parse(
       'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
     );
 
-    try {
-      final ok = await launchUrl(native, mode: LaunchMode.externalApplication);
-      if (!ok) {
-        await launchUrl(web, mode: LaunchMode.externalApplication);
+    // Android: mantener Google Maps nativo.
+    if (Platform.isAndroid) {
+      try {
+        final native = Uri.parse(
+          'google.navigation:q=$lat,$lng&mode=d',
+        );
+
+        final ok = await launchUrl(
+          native,
+          mode: LaunchMode.externalApplication,
+        );
+
+        if (ok) return;
+      } catch (_) {
+        // Si falla, intentar alternativa web.
       }
-    } catch (_) {
-      await launchUrl(web, mode: LaunchMode.externalApplication);
     }
+
+    // iOS: intentar abrir Google Maps instalado.
+    if (Platform.isIOS) {
+      try {
+        final native = Uri.parse(
+          'comgooglemaps://?daddr=$lat,$lng&directionsmode=driving',
+        );
+
+        final ok = await launchUrl(
+          native,
+          mode: LaunchMode.externalApplication,
+        );
+
+        if (ok) return;
+      } catch (_) {
+        // Si no está instalado, intentar alternativa web.
+      }
+    }
+
+    // Alternativa para Android e iOS.
+    try {
+      final ok = await launchUrl(
+        web,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (ok) return;
+    } catch (_) {
+      // Intentar navegador integrado.
+    }
+
+    // Última alternativa.
+    try {
+      final ok = await launchUrl(
+        web,
+        mode: LaunchMode.inAppBrowserView,
+      );
+
+      if (ok) return;
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('No se pudo abrir la navegación'),
+      ),
+    );
   }
 
   Future<void> _comenzarGoogleMapsAlLocal(String idLocal) async {
@@ -1023,6 +1071,8 @@ class _PedidosPersonalizadosScreenState
                     final idCadetePedido =
                         (pedidoSel?.data()['idCadete'] ?? '').toString();
                     final esMio = _uid != null && idCadetePedido == _uid;
+                    final tiempoPreparacion =
+                        _toInt(pedidoSel?.data()['tiempoPreparacion']);
 
                     final puedeComenzar = esMio &&
                         _selDestino != null &&
@@ -1059,6 +1109,30 @@ class _PedidosPersonalizadosScreenState
                               'Pago al cadete: \$${_selMontoCadete.toString()}')
                         else
                           const Text('Pago al cadete: (sin monto guardado)'),
+                        if (tiempoPreparacion != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.access_time,
+                                  size: 16,
+                                  color: Colors.orange,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  tiempoPreparacion == 21
+                                      ? '+20 min'
+                                      : '$tiempoPreparacion min',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         if (esMio &&
                             (_selEstado == _estadoAceptado ||
                                 _selEstado == _estadoEntregadoAlCadete ||

@@ -181,6 +181,8 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
 
   bool _mostrarCadetes = false;
 
+  int? _tiempoPreparacion;
+
   double? _distKm;
   int? _montoTotal;
 
@@ -377,6 +379,7 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
       'estado': 'pendiente',
       'cliente': _clienteCtl.text.trim(),
       'telefonoCliente': _telefonoCtl.text.trim(),
+      'tiempoPreparacion': _tiempoPreparacion,
       'descripcion': 'Pedido personalizado desde mapa',
       'ubicacionDestino': {
         'lat': _destinoTmp!.latitude,
@@ -877,6 +880,32 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
                           labelText: 'WhatsApp del cliente',
                           border: OutlineInputBorder(),
                         ),
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<int>(
+                        value: _tiempoPreparacion,
+                        decoration: const InputDecoration(
+                          labelText: 'Tiempo de preparación',
+                          prefixIcon: Icon(Icons.access_time),
+                          border: OutlineInputBorder(),
+                        ),
+                        hint: const Text('Seleccionar tiempo'),
+                        items: const [
+                          DropdownMenuItem(value: 5, child: Text('5 minutos')),
+                          DropdownMenuItem(
+                              value: 10, child: Text('10 minutos')),
+                          DropdownMenuItem(
+                              value: 15, child: Text('15 minutos')),
+                          DropdownMenuItem(
+                              value: 20, child: Text('20 minutos')),
+                          DropdownMenuItem(
+                              value: 21, child: Text('Más de 20 minutos')),
+                        ],
+                        onChanged: (valor) {
+                          setState(() {
+                            _tiempoPreparacion = valor;
+                          });
+                        },
                       ),
                       const SizedBox(height: 12),
                       ElevatedButton.icon(

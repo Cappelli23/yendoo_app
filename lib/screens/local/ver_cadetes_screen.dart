@@ -154,6 +154,7 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
 
   final List<Map<String, dynamic>> _cadetes = [];
   final List<String> _favoritos = [];
+  final Set<String> _cadetesConPedidoActivo = {};
 
   final List<maplibre.Symbol> _symbols = [];
   final List<maplibre.Circle> _cadeteCircles = [];
@@ -165,6 +166,7 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
     _cargarLocal();
     _cargarFavoritos();
     _escucharCadetes();
+    _escucharPedidosActivos();
   }
 
   Future<void> _cargarLocal() async {
@@ -260,6 +262,50 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
     );
   }
 
+  void _escucharPedidosActivos() {
+    FirebaseFirestore.instance
+        .collection('pedidosEnCurso')
+        .where('idLocal', isEqualTo: widget.localId)
+        .snapshots()
+        .listen((snap) async {
+      if (!mounted) return;
+
+      final activos = <String>{};
+
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final estado = (data['estado'] ?? '').toString();
+
+        if (estado == 'entregado_cliente' ||
+            estado == 'entregado' ||
+            estado == 'rechazado_local' ||
+            estado == 'pendiente') {
+          continue;
+        }
+
+        final asignado = data['asignado'];
+
+        if (asignado is Map) {
+          final cadeteId = (asignado['cadeteId'] ?? '').toString();
+
+          if (cadeteId.isNotEmpty) {
+            activos.add(cadeteId);
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _cadetesConPedidoActivo
+          ..clear()
+          ..addAll(activos);
+      });
+
+      await _dibujarMarkers();
+    });
+  }
+
   void _escucharCadetes() {
     FirebaseFirestore.instance
         .collection('usuarios')
@@ -349,6 +395,7 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
       );
 
       final esFav = _favoritos.contains(cad['id']);
+      final tienePedidoActivo = _cadetesConPedidoActivo.contains(cad['id']);
 
       final circle = await map.addCircle(
         maplibre.CircleOptions(
@@ -356,7 +403,8 @@ class _VerCadetesScreenState extends State<VerCadetesScreen> {
             pos.latitude,
             pos.longitude,
           ),
-          circleColor: esFav ? '#FF0000' : '#00AA00',
+          circleColor:
+              tienePedidoActivo ? '#00BFFF' : (esFav ? '#FF0000' : '#00AA00'),
           circleRadius: 11,
           circleStrokeColor: '#FFFFFF',
           circleStrokeWidth: 3,
