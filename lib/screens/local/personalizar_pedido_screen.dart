@@ -1,4 +1,5 @@
-﻿import 'dart:async';
+﻿import 'package:cloud_functions/cloud_functions.dart';
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -185,6 +186,10 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
 
   double? _distKm;
   int? _montoTotal;
+  bool _guardando = false;
+  String? _clientOrderId;
+
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _saldoStream;
 
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> _pedidos = [];
 
@@ -193,21 +198,192 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
   final List<maplibre.Symbol> _symbols = [];
 
   final List<maplibre.Circle> _circles = [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subZonasRojas;
+  List<List<maplibre.LatLng>> _zonasRojas = [];
+  static const String _zonasSourceId = 'yendo-zonas-rojas';
+  static const String _zonasLayerId = 'yendo-zonas-rojas-visual';
+
+  bool _capaZonasCreada = false;
+  bool _dibujandoZonas = false;
+  bool _redibujarZonasPendiente = false;
 
   @override
   void initState() {
     super.initState();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid != null) {
+      _saldoStream = FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(uid)
+          .snapshots();
+    }
 
     _cargarLocalYFavoritos().then((_) => _escucharPedidos());
+    _escucharZonasRojas();
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _subZonasRojas?.cancel();
     _clienteCtl.dispose();
     _telefonoCtl.dispose();
     _linkCtl.dispose();
     super.dispose();
+  }
+
+  List<maplibre.LatLng> _leerPuntosZona(dynamic raw) {
+    if (raw is! List) return [];
+
+    final puntos = <maplibre.LatLng>[];
+
+    for (final item in raw) {
+      if (item is! Map) return [];
+
+      final lat = item['lat'];
+      final lng = item['lng'];
+
+      if (lat is! num || lng is! num) return [];
+
+      puntos.add(
+        maplibre.LatLng(lat.toDouble(), lng.toDouble()),
+      );
+    }
+
+    return puntos;
+  }
+
+  bool _destinoEnZonaRoja(LatLng destino) {
+    for (final zona in _zonasRojas) {
+      bool dentro = false;
+      int j = zona.length - 1;
+
+      for (int i = 0; i < zona.length; i++) {
+        final xi = zona[i].longitude;
+        final yi = zona[i].latitude;
+        final xj = zona[j].longitude;
+        final yj = zona[j].latitude;
+
+        if ((yi > destino.latitude) != (yj > destino.latitude) &&
+            destino.longitude <
+                (xj - xi) * (destino.latitude - yi) / (yj - yi) + xi) {
+          dentro = !dentro;
+        }
+
+        j = i;
+      }
+
+      if (dentro) return true;
+    }
+
+    return false;
+  }
+
+  void _escucharZonasRojas() {
+    _subZonasRojas = FirebaseFirestore.instance
+        .collection('zonasRojas')
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      final nuevasZonas = <List<maplibre.LatLng>>[];
+
+      for (final doc in snapshot.docs) {
+        final datos = doc.data();
+
+        if (datos['activo'] != true) continue;
+
+        final puntos = _leerPuntosZona(datos['puntos']);
+
+        if (puntos.length >= 3) {
+          nuevasZonas.add(puntos);
+        }
+      }
+
+      setState(() {
+        _zonasRojas = nuevasZonas;
+      });
+
+      unawaited(_dibujarZonasRojas());
+    }, onError: (Object error) {
+      debugPrint('Error leyendo zonas rojas: $error');
+    });
+  }
+
+  Future<void> _dibujarZonasRojas() async {
+    final map = _mapLibreController;
+    if (!_mapStyleLoaded || map == null) return;
+
+    if (_dibujandoZonas) {
+      _redibujarZonasPendiente = true;
+      return;
+    }
+
+    _dibujandoZonas = true;
+
+    try {
+      do {
+        _redibujarZonasPendiente = false;
+
+        final features = <Map<String, dynamic>>[];
+
+        for (final puntos in _zonasRojas) {
+          if (puntos.length < 3) continue;
+
+          final coordenadas =
+              puntos.map((p) => [p.longitude, p.latitude]).toList();
+
+          coordenadas.add([
+            puntos.first.longitude,
+            puntos.first.latitude,
+          ]);
+
+          features.add({
+            'type': 'Feature',
+            'properties': <String, dynamic>{},
+            'geometry': {
+              'type': 'Polygon',
+              'coordinates': [coordenadas],
+            },
+          });
+        }
+
+        final geojson = <String, dynamic>{
+          'type': 'FeatureCollection',
+          'features': features,
+        };
+
+        if (!_capaZonasCreada) {
+          await map.addGeoJsonSource(
+            _zonasSourceId,
+            geojson,
+          );
+
+          await map.addFillLayer(
+            _zonasSourceId,
+            _zonasLayerId,
+            const maplibre.FillLayerProperties(
+              fillColor: '#E53935',
+              fillOpacity: 0.30,
+              fillOutlineColor: '#B71C1C',
+            ),
+            enableInteraction: false,
+          );
+
+          _capaZonasCreada = true;
+        } else {
+          await map.setGeoJsonSource(
+            _zonasSourceId,
+            geojson,
+          );
+        }
+      } while (_redibujarZonasPendiente && mounted);
+    } catch (e) {
+      debugPrint('Error dibujando zonas rojas: $e');
+    } finally {
+      _dibujandoZonas = false;
+    }
   }
 
   Future<void> _cargarLocalYFavoritos() async {
@@ -331,6 +507,29 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
   }
 
   Future<void> _confirmarPedido() async {
+    if (_guardando) return;
+
+    setState(() => _guardando = true);
+
+    try {
+      await _procesarPedidoPersonalizado();
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _guardando = false);
+      }
+    }
+  }
+
+  Future<void> _procesarPedidoPersonalizado() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
 
     if (uid == null ||
@@ -339,6 +538,8 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
         _clienteCtl.text.trim().isEmpty ||
         _telefonoCtl.text.trim().isEmpty ||
         _cadetesElegidos.isEmpty ||
+        _tiempoPreparacion == null ||
+        _distKm == null ||
         _montoTotal == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -365,48 +566,64 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
       return;
     }
 
-    final docLocal =
-        await FirebaseFirestore.instance.collection('usuarios').doc(uid).get();
+    final String orderId = _clientOrderId ??
+        FirebaseFirestore.instance.collection('pedidosEnCurso').doc().id;
 
-    final nombreLocal = docLocal.data()?['nombre'] ?? 'Local';
+    _clientOrderId = orderId;
 
-    const ganAdmin = 15;
+    try {
+      final callable = FirebaseFunctions.instanceFor(
+        region: 'southamerica-east1',
+      ).httpsCallable('crearPedidoYendo');
 
-    final montoCadete = _montoTotal! - ganAdmin;
+      final resultado = await callable.call({
+        'orderId': orderId,
+        'tipo': 'personalizado',
+        'cliente': _clienteCtl.text.trim(),
+        'telefonoCliente': _telefonoCtl.text.trim(),
+        'ubicacionDestino': {
+          'lat': _destinoTmp!.latitude,
+          'lng': _destinoTmp!.longitude,
+        },
+        'cadetesAsignados': List<String>.from(_cadetesElegidos),
+        'tiempoPreparacion': _tiempoPreparacion,
+      });
 
-    final pedidoData = {
-      'tipo': 'personalizado',
-      'estado': 'pendiente',
-      'cliente': _clienteCtl.text.trim(),
-      'telefonoCliente': _telefonoCtl.text.trim(),
-      'tiempoPreparacion': _tiempoPreparacion,
-      'descripcion': 'Pedido personalizado desde mapa',
-      'ubicacionDestino': {
-        'lat': _destinoTmp!.latitude,
-        'lng': _destinoTmp!.longitude,
-      },
-      'ubicacionOrigen': {
-        'lat': _localPos!.latitude,
-        'lng': _localPos!.longitude,
-      },
-      'cadetesAsignados': _cadetesElegidos,
-      'idLocal': uid,
-      'localNombre': nombreLocal,
-      'distanciaKmMostrable': distanciaRedondeada,
-      'distanciaKmReal': distanciaRedondeada,
-      'distancia_km': distanciaRedondeada,
-      'kmTarifaLocal': distanciaRedondeada,
-      'kmTarifaCadete': distanciaRedondeada,
-      'montoCadete': montoCadete,
-      'montoGananciaAdmin': ganAdmin,
-      'montoTotal': _montoTotal,
-      'fechaCreado': Timestamp.now(),
-      'asignado': null,
-    };
+      final bool creado = resultado.data['creado'] == true;
 
-    await FirebaseFirestore.instance
-        .collection('pedidosEnCurso')
-        .add(pedidoData);
+      if (!creado) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Este pedido ya fue confirmado.'),
+          ),
+        );
+        return;
+      }
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message ?? 'No se pudo generar el pedido.'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      return;
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo generar el pedido: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
 
     if (!mounted) return;
 
@@ -419,6 +636,7 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
     _clienteCtl.clear();
     _telefonoCtl.clear();
     _linkCtl.clear();
+    _clientOrderId = null;
 
     await _dibujarMarkers();
   }
@@ -683,7 +901,8 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
     _symbols.add(localSymbol);
 
     // 🔴🟢 pedidos
-    for (final doc in _pedidos) {
+    for (final doc
+        in List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(_pedidos)) {
       final d = doc.data();
 
       final pos = LatLng(
@@ -767,7 +986,9 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
             },
             onStyleLoadedCallback: () async {
               _mapStyleLoaded = true;
+              _capaZonasCreada = false;
 
+              await _dibujarZonasRojas();
               await _dibujarMarkers();
             },
             onMapClick: (_, point) async {
@@ -866,6 +1087,29 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
                 child: SingleChildScrollView(
                   child: Column(
                     children: [
+                      if (_destinoTmp != null &&
+                          _destinoEnZonaRoja(_destinoTmp!)) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            border: Border.all(color: Colors.red),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text(
+                            '⚠️ ZONA ROJA\n'
+                            'Esta dirección está dentro de una zona de precaución.\n'
+                            'Si no es un cliente habitual, recomendamos aceptar únicamente pagos por transferencia.\n'
+                            'Podés continuar con el pedido normalmente.',
+                            style: TextStyle(
+                              color: Colors.red,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       TextField(
                         controller: _clienteCtl,
                         decoration: const InputDecoration(
@@ -977,10 +1221,23 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
                                     label: Text(nombre),
                                     selected: sel,
                                     onSelected: (v) {
+                                      if (v && _cadetesElegidos.length >= 12) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                                'Podés seleccionar un máximo de 12 cadetes.'),
+                                          ),
+                                        );
+                                        return;
+                                      }
+
                                       setState(() {
-                                        v
-                                            ? _cadetesElegidos.add(id)
-                                            : _cadetesElegidos.remove(id);
+                                        if (v) {
+                                          _cadetesElegidos.add(id);
+                                        } else {
+                                          _cadetesElegidos.remove(id);
+                                        }
                                       });
                                     },
                                   );
@@ -991,21 +1248,73 @@ class _PersonalizarPedidoScreenState extends State<PersonalizarPedidoScreen> {
                         ),
                       const SizedBox(height: 12),
                       if (_distKm != null && _montoTotal != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Text(
-                            'Distancia: ${_distKm!.toStringAsFixed(1)} km\nPrecio total: \$$_montoTotal',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                        StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                          stream: _saldoStream,
+                          builder: (context, snapshot) {
+                            final data = snapshot.data?.data();
+                            final prepagoActivo =
+                                data?['saldoPrepagoActivo'] == true;
+                            final saldoDato = data?['saldo'];
+
+                            final saldoValido = saldoDato is num &&
+                                saldoDato.isFinite &&
+                                saldoDato >= 0 &&
+                                saldoDato % 1 == 0;
+
+                            final saldo = saldoValido ? saldoDato.toInt() : 0;
+                            final alcanza =
+                                saldoValido && saldo >= _montoTotal!;
+
+                            return Column(
+                              children: [
+                                Text(
+                                  'Distancia: ${_distKm!.toStringAsFixed(1)} km\n'
+                                  'Precio total: \$$_montoTotal',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                if (prepagoActivo) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    !snapshot.hasData
+                                        ? 'Consultando saldo...'
+                                        : !saldoValido
+                                            ? 'Saldo no disponible'
+                                            : 'Saldo disponible: \$$saldo',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color:
+                                          alcanza ? Colors.green : Colors.red,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  if (snapshot.hasData && !alcanza)
+                                    const Text(
+                                      'Saldo insuficiente para generar el pedido',
+                                      style: TextStyle(color: Colors.red),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                ],
+                              ],
+                            );
+                          },
                         ),
                       ElevatedButton.icon(
-                        onPressed: _confirmarPedido,
-                        icon: const Icon(Icons.check),
-                        label: const Text(
-                          'Confirmar pedido',
+                        onPressed: _guardando ? null : _confirmarPedido,
+                        icon: _guardando
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.check),
+                        label: Text(
+                          _guardando ? 'Guardando...' : 'Confirmar pedido',
                         ),
                       ),
                     ],

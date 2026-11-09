@@ -21,6 +21,8 @@ import 'screens/cadete/historial_pedidos_cadete_screen.dart';
 import 'screens/admin/admin_dashboard.dart';
 import 'screens/admin/admin_locales_screen.dart';
 import 'screens/admin/admin_cadetes_screen.dart';
+import 'screens/admin/cargar_saldo_admin_screen.dart';
+import 'screens/admin/zonas_rojas_admin_screen.dart';
 import 'screens/local/generar_pedido_screen.dart';
 import 'screens/local/personalizar_pedido_screen.dart';
 
@@ -72,6 +74,8 @@ class MyApp extends StatelessWidget {
         '/adminDashboard': (context) => const AdminDashboardScreen(),
         '/verLocalesAdmin': (context) => const AdminLocalesScreen(),
         '/verCadetesAdmin': (context) => const AdminCadetesScreen(),
+        '/cargarSaldoAdmin': (context) => const CargarSaldoAdminScreen(),
+        '/zonasRojasAdmin': (context) => const ZonasRojasAdminScreen(),
         '/generarPedido': (context) => const GenerarPedidoScreen(),
         '/personalizarPedido': (context) => const PersonalizarPedidoScreen(),
       },
@@ -99,7 +103,8 @@ class _RootGate extends StatelessWidget {
 
         final uid = authSnap.data!.uid;
         return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          future: FirebaseFirestore.instance.collection('usuarios').doc(uid).get(),
+          future:
+              FirebaseFirestore.instance.collection('usuarios').doc(uid).get(),
           builder: (context, userSnap) {
             if (userSnap.connectionState == ConnectionState.waiting) {
               return const Scaffold(

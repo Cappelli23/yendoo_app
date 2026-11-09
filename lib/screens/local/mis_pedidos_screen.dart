@@ -1,4 +1,5 @@
-﻿import 'package:cloud_firestore/cloud_firestore.dart';
+﻿import 'package:cloud_functions/cloud_functions.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -38,11 +39,6 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
         .doc(docId)
         .update(patch);
   }
-
-  Future<void> _aceptar(String docId) =>
-      _updateEstado(docId, 'aceptado', extra: {
-        'fechaAceptado': FieldValue.serverTimestamp(),
-      });
 
   Future<void> _marcarListo(String docId) =>
       _updateEstado(docId, 'listo', extra: {
@@ -252,7 +248,7 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
                     children: [
                       ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.local_shipping, color: colorEstado),
+                        leading: Icon(Icons.two_wheeler, color: colorEstado),
                         title: Text('Cliente: $cliente'),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,21 +318,6 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
                         runSpacing: 8,
                         children: [
                           if (estado == 'pendiente')
-                            FilledButton(
-                              onPressed: () async {
-                                await _aceptar(doc.id);
-                                if (!context.mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Pedido aceptado.'),
-                                    duration: Duration(seconds: 2),
-                                  ),
-                                );
-                              },
-                              child: const Text('Aceptar'),
-                            ),
-
-                          if (estado == 'pendiente')
                             FilledButton.tonal(
                               onPressed: () async {
                                 final confirmar = await showDialog<bool>(
@@ -360,14 +341,24 @@ class _MisPedidosScreenState extends State<MisPedidosScreen> {
                                   ),
                                 );
                                 if (confirmar == true) {
-                                  await FirebaseFirestore.instance
-                                      .collection('pedidosEnCurso')
-                                      .doc(doc.id)
-                                      .delete();
+                                  final resultado =
+                                      await FirebaseFunctions.instanceFor(
+                                    region: 'southamerica-east1',
+                                  ).httpsCallable('cancelarPedidoYendo').call({
+                                    'pedidoId': doc.id,
+                                  });
+
+                                  final devolucion =
+                                      (resultado.data['devolucion'] as num?) ??
+                                          0;
                                   if (!context.mounted) return;
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Pedido eliminado.'),
+                                    SnackBar(
+                                      content: Text(
+                                        devolucion > 0
+                                            ? 'Pedido eliminado. Se devolvieron \$$devolucion al saldo.'
+                                            : 'Pedido eliminado.',
+                                      ),
                                       duration: Duration(seconds: 2),
                                       backgroundColor: Colors.green,
                                     ),

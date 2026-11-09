@@ -5,7 +5,7 @@ class LocalFABButtons extends StatelessWidget {
   final void Function(String action) onPressed;
 
   const LocalFABButtons({
-    super.key, // âœ… super parameter usado aquÃ­
+    super.key,
     required this.buttonsVisible,
     required this.onPressed,
   });
@@ -36,6 +36,12 @@ class LocalFABButtons extends StatelessWidget {
           onPressed: () => onPressed("verCadetes"),
         ),
         FloatingActionButton.extended(
+          heroTag: 'disponibles',
+          label: const Text('Disponibles'),
+          icon: const Icon(Icons.star_outline),
+          onPressed: () => onPressed("cadetesDisponibles"),
+        ),
+        FloatingActionButton.extended(
           heroTag: 'historial',
           label: const Text('Historial'),
           icon: const Icon(Icons.history),
@@ -52,4 +58,3 @@ class LocalFABButtons extends StatelessWidget {
     );
   }
 }
-

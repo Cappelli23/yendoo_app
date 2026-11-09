@@ -175,3 +175,161 @@ exports.notificarPedidoPendienteLocal = functions.firestore
       return null;
     }
   });
+  
+ // ======================================================
+ // YENDO - ACTIVAR CADETES SEGÚN HORARIO DE TRABAJO
+ // ======================================================
+
+exports.actualizarDisponibilidadCadetes = functions.pubsub
+  .schedule("every 1 minutes")
+  .timeZone("America/Montevideo")
+  .onRun(async () => {
+    const db = admin.firestore();
+
+    const ahora = new Date();
+
+    const partes = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Montevideo",
+      weekday: "long",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(ahora);
+
+    const obtener = (tipo) =>
+      partes.find((p) => p.type === tipo)?.value;
+
+    const diaActual = obtener("weekday");
+    const horaActual = Number(obtener("hour"));
+    const minutoActual = Number(obtener("minute"));
+
+    const dias = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+
+    const diasFirestore = [
+      "Domingo",
+      "Lunes",
+      "Martes",
+      "Miércoles",
+      "Jueves",
+      "Viernes",
+      "Sábado",
+    ];
+
+    const indiceDia = dias.indexOf(diaActual);
+
+    if (indiceDia === -1) {
+      console.error("No se pudo identificar el día:", diaActual);
+      return null;
+    }
+
+    const minutosActuales = horaActual * 60 + minutoActual;
+
+    function convertirMinutos(hora) {
+      if (typeof hora !== "string") return null;
+
+      const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hora);
+      if (!match) return null;
+
+      return Number(match[1]) * 60 + Number(match[2]);
+    }
+
+    function estaEnHorario(horarios) {
+      if (!horarios || typeof horarios !== "object") {
+        return false;
+      }
+
+      const dia = diasFirestore[indiceDia];
+      const diaAnterior =
+        diasFirestore[(indiceDia + 6) % 7];
+
+      const horarioHoy = horarios[dia];
+
+      if (horarioHoy?.activo === true) {
+        const inicio = convertirMinutos(horarioHoy.desde);
+        const fin = convertirMinutos(horarioHoy.hasta);
+
+        if (inicio !== null && fin !== null) {
+          if (inicio < fin &&
+              minutosActuales >= inicio &&
+              minutosActuales < fin) {
+            return true;
+          }
+
+          if (inicio > fin &&
+              minutosActuales >= inicio) {
+            return true;
+          }
+        }
+      }
+
+      // Horarios del día anterior que cruzan medianoche.
+      const horarioAyer = horarios[diaAnterior];
+
+      if (horarioAyer?.activo === true) {
+        const inicio = convertirMinutos(horarioAyer.desde);
+        const fin = convertirMinutos(horarioAyer.hasta);
+
+        if (inicio !== null &&
+            fin !== null &&
+            inicio > fin &&
+            minutosActuales < fin) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    const snapshot = await db
+      .collection("usuarios")
+      .where("rol", "==", "cadete")
+      .get();
+
+    let actualizados = 0;
+    let batch = db.batch();
+    let operaciones = 0;
+
+    for (const doc of snapshot.docs) {
+      const datos = doc.data();
+
+      const debeEstarActivo =
+        estaEnHorario(datos.horariosTrabajo);
+
+      // Evita escrituras innecesarias.
+      if (datos.activo === debeEstarActivo) {
+        continue;
+      }
+
+      batch.update(doc.ref, {
+        activo: debeEstarActivo,
+      });
+
+      actualizados++;
+      operaciones++;
+
+      if (operaciones === 400) {
+        await batch.commit();
+        batch = db.batch();
+        operaciones = 0;
+      }
+    }
+
+    if (operaciones > 0) {
+      await batch.commit();
+    }
+
+    console.log(
+      `Cadetes revisados: ${snapshot.size}. ` +
+      `Disponibilidades actualizadas: ${actualizados}.`
+    );
+
+    return null;
+  });

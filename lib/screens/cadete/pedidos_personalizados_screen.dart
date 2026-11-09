@@ -28,6 +28,10 @@ class _PedidosPersonalizadosScreenState
       _circlePedidos = {};
   final List<maplibre.Circle> _circles = [];
   final List<maplibre.Symbol> _symbols = [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subZonasRojas;
+  List<List<maplibre.LatLng>> _zonasRojas = [];
+  bool _dibujandoZonas = false;
+  bool _redibujarZonasPendiente = false;
 
   final Map<String, LatLng> _ubicacionesLocales = {};
   LatLng? _miPos;
@@ -246,13 +250,170 @@ class _PedidosPersonalizadosScreenState
     _uid = FirebaseAuth.instance.currentUser?.uid;
     _cargarPosCadete();
     _escucharPedidos();
+    _escucharZonasRojas();
   }
 
   @override
   void dispose() {
     _sub?.cancel();
+    _subZonasRojas?.cancel();
     _player.dispose();
     super.dispose();
+  }
+
+  List<maplibre.LatLng> _leerPuntosZona(dynamic raw) {
+    if (raw is! List) return [];
+
+    final puntos = <maplibre.LatLng>[];
+
+    for (final item in raw) {
+      if (item is! Map) return [];
+
+      final lat = item['lat'];
+      final lng = item['lng'];
+
+      if (lat is! num || lng is! num) return [];
+
+      puntos.add(
+        maplibre.LatLng(lat.toDouble(), lng.toDouble()),
+      );
+    }
+
+    return puntos;
+  }
+
+  void _escucharZonasRojas() {
+    _subZonasRojas = FirebaseFirestore.instance
+        .collection('zonasRojas')
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      final nuevasZonas = <List<maplibre.LatLng>>[];
+
+      for (final doc in snapshot.docs) {
+        final datos = doc.data();
+
+        if (datos['activo'] != true) continue;
+
+        final puntos = _leerPuntosZona(datos['puntos']);
+
+        if (puntos.length >= 3) {
+          nuevasZonas.add(puntos);
+        }
+      }
+
+      setState(() {
+        _zonasRojas = nuevasZonas;
+      });
+
+      unawaited(_dibujarZonasRojas());
+    }, onError: (Object error) {
+      debugPrint('Error leyendo zonas rojas: $error');
+    });
+  }
+
+  static const String _zonasSourceId = 'yendo-zonas-rojas';
+  static const String _zonasLayerId = 'yendo-zonas-rojas-visual';
+
+  bool _capaZonasCreada = false;
+
+  Future<void> _dibujarZonasRojas() async {
+    final map = _mapLibreController;
+    if (!_mapStyleLoaded || map == null) return;
+
+    if (_dibujandoZonas) {
+      _redibujarZonasPendiente = true;
+      return;
+    }
+
+    _dibujandoZonas = true;
+
+    try {
+      do {
+        _redibujarZonasPendiente = false;
+
+        final features = <Map<String, dynamic>>[];
+
+        for (final puntos in _zonasRojas) {
+          if (puntos.length < 3) continue;
+
+          final coordenadas =
+              puntos.map((p) => [p.longitude, p.latitude]).toList();
+
+          coordenadas.add([
+            puntos.first.longitude,
+            puntos.first.latitude,
+          ]);
+
+          features.add({
+            'type': 'Feature',
+            'properties': <String, dynamic>{},
+            'geometry': {
+              'type': 'Polygon',
+              'coordinates': [coordenadas],
+            },
+          });
+        }
+
+        final geojson = <String, dynamic>{
+          'type': 'FeatureCollection',
+          'features': features,
+        };
+
+        if (!_capaZonasCreada) {
+          await map.addGeoJsonSource(
+            _zonasSourceId,
+            geojson,
+          );
+
+          await map.addFillLayer(
+            _zonasSourceId,
+            _zonasLayerId,
+            const maplibre.FillLayerProperties(
+              fillColor: '#E53935',
+              fillOpacity: 0.30,
+              fillOutlineColor: '#B71C1C',
+            ),
+          );
+
+          _capaZonasCreada = true;
+        } else {
+          await map.setGeoJsonSource(
+            _zonasSourceId,
+            geojson,
+          );
+        }
+      } while (_redibujarZonasPendiente && mounted);
+    } catch (e) {
+      debugPrint('Error dibujando zonas rojas: $e');
+    } finally {
+      _dibujandoZonas = false;
+    }
+  }
+
+  bool _destinoEnZonaRoja(LatLng destino) {
+    final x = destino.longitude;
+    final y = destino.latitude;
+
+    for (final poligono in _zonasRojas) {
+      bool dentro = false;
+
+      for (int i = 0, j = poligono.length - 1; i < poligono.length; j = i++) {
+        final xi = poligono[i].longitude;
+        final yi = poligono[i].latitude;
+        final xj = poligono[j].longitude;
+        final yj = poligono[j].latitude;
+
+        if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+          dentro = !dentro;
+        }
+      }
+
+      if (dentro) return true;
+    }
+
+    return false;
   }
 
   Future<void> _cargarPosCadete() async {
@@ -1021,6 +1182,8 @@ class _PedidosPersonalizadosScreenState
             },
             onStyleLoadedCallback: () async {
               _mapStyleLoaded = true;
+              _capaZonasCreada = false;
+              await _dibujarZonasRojas();
               await _dibujarMarkersMapLibre();
             },
             onMapClick: (_, __) => _limpiarSel(),
@@ -1096,6 +1259,34 @@ class _PedidosPersonalizadosScreenState
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (_selDestino != null &&
+                            _destinoEnZonaRoja(_selDestino!))
+                          Container(
+                            width: double.infinity,
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              border: Border.all(color: Colors.red),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '⚠️ ZONA ROJA',
+                                  style: TextStyle(
+                                    color: Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Si no es un cliente habitual, aceptar únicamente pagos por transferencia.',
+                                ),
+                              ],
+                            ),
+                          ),
                         if (_selNombreLocal != null &&
                             _selNombreLocal!.isNotEmpty)
                           Text('Local: $_selNombreLocal'),

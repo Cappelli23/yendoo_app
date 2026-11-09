@@ -8,6 +8,7 @@ import 'package:maplibre_gl/maplibre_gl.dart' as maplibre;
 import 'screens/local/historial_pedidos_screen.dart';
 import 'screens/local/mis_pedidos_screen.dart';
 import 'screens/local/ver_cadetes_screen.dart';
+import 'screens/local/cadetes_disponibles_screen.dart';
 import 'login_screen.dart';
 
 class LocalDashboard extends StatefulWidget {
@@ -300,6 +301,22 @@ class _LocalDashboardState extends State<LocalDashboard> {
         }
         break;
 
+      case "cadetesDisponibles":
+        final localId = FirebaseAuth.instance.currentUser?.uid;
+
+        if (localId != null && mounted) {
+          safeNavigate(
+            () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CadetesDisponiblesScreen(
+                  localId: localId,
+                ),
+              ),
+            ),
+          );
+        }
+        break;
       case "misPedidos":
         safeNavigate(
           () => Navigator.push(
@@ -438,6 +455,12 @@ class _LocalDashboardState extends State<LocalDashboard> {
                       "Ver cadetes",
                       Icons.people_alt,
                       "verCadetes",
+                      buttonMaxWidth,
+                    ),
+                    _actionButton(
+                      "Cadetes disponibles",
+                      Icons.star_outline,
+                      "cadetesDisponibles",
                       buttonMaxWidth,
                     ),
                     _actionButton(

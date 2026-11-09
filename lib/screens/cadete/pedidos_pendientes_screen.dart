@@ -29,6 +29,16 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
       _circlePedidos = {};
   final List<maplibre.Circle> _circles = [];
   final List<maplibre.Symbol> _symbols = [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subZonasRojas;
+
+  List<List<maplibre.LatLng>> _zonasRojas = [];
+
+  static const String _zonasSourceId = 'yendo-zonas-rojas';
+  static const String _zonasLayerId = 'yendo-zonas-rojas-visual';
+
+  bool _capaZonasCreada = false;
+  bool _dibujandoZonas = false;
+  bool _redibujarZonasPendiente = false;
 
   final AudioPlayer _audioPlayer = AudioPlayer();
 
@@ -203,6 +213,162 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
 }
 ''';
 
+  List<maplibre.LatLng> _leerPuntosZona(dynamic raw) {
+    if (raw is! List) return [];
+
+    final puntos = <maplibre.LatLng>[];
+
+    for (final item in raw) {
+      if (item is! Map) return [];
+
+      final lat = item['lat'];
+      final lng = item['lng'];
+
+      if (lat is! num || lng is! num) return [];
+
+      puntos.add(maplibre.LatLng(
+        lat.toDouble(),
+        lng.toDouble(),
+      ));
+    }
+
+    return puntos;
+  }
+
+  bool _destinoEnZonaRoja(LatLng destino) {
+    for (final zona in _zonasRojas) {
+      if (zona.length < 3) continue;
+
+      bool dentro = false;
+      int j = zona.length - 1;
+
+      for (int i = 0; i < zona.length; i++) {
+        final xi = zona[i].longitude;
+        final yi = zona[i].latitude;
+        final xj = zona[j].longitude;
+        final yj = zona[j].latitude;
+
+        if ((yi > destino.latitude) != (yj > destino.latitude) &&
+            destino.longitude <
+                (xj - xi) * (destino.latitude - yi) / (yj - yi) + xi) {
+          dentro = !dentro;
+        }
+
+        j = i;
+      }
+
+      if (dentro) return true;
+    }
+
+    return false;
+  }
+
+  void _escucharZonasRojas() {
+    _subZonasRojas = FirebaseFirestore.instance
+        .collection('zonasRojas')
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      final nuevasZonas = <List<maplibre.LatLng>>[];
+
+      for (final doc in snapshot.docs) {
+        final datos = doc.data();
+
+        if (datos['activo'] != true) continue;
+
+        final puntos = _leerPuntosZona(datos['puntos']);
+
+        if (puntos.length >= 3) {
+          nuevasZonas.add(puntos);
+        }
+      }
+
+      setState(() {
+        _zonasRojas = nuevasZonas;
+      });
+
+      unawaited(_dibujarZonasRojas());
+    }, onError: (Object error) {
+      debugPrint('Error leyendo zonas rojas: $error');
+    });
+  }
+
+  Future<void> _dibujarZonasRojas() async {
+    final map = _mapLibreController;
+    if (!_mapStyleLoaded || map == null) return;
+
+    if (_dibujandoZonas) {
+      _redibujarZonasPendiente = true;
+      return;
+    }
+
+    _dibujandoZonas = true;
+
+    try {
+      do {
+        _redibujarZonasPendiente = false;
+
+        final features = <Map<String, dynamic>>[];
+
+        for (final puntos in _zonasRojas) {
+          if (puntos.length < 3) continue;
+
+          final coordenadas =
+              puntos.map((p) => [p.longitude, p.latitude]).toList();
+
+          coordenadas.add([
+            puntos.first.longitude,
+            puntos.first.latitude,
+          ]);
+
+          features.add({
+            'type': 'Feature',
+            'properties': <String, dynamic>{},
+            'geometry': {
+              'type': 'Polygon',
+              'coordinates': [coordenadas],
+            },
+          });
+        }
+
+        final geojson = <String, dynamic>{
+          'type': 'FeatureCollection',
+          'features': features,
+        };
+
+        if (!_capaZonasCreada) {
+          await map.addGeoJsonSource(
+            _zonasSourceId,
+            geojson,
+          );
+
+          await map.addFillLayer(
+            _zonasSourceId,
+            _zonasLayerId,
+            const maplibre.FillLayerProperties(
+              fillColor: '#E53935',
+              fillOpacity: 0.30,
+              fillOutlineColor: '#B71C1C',
+            ),
+            enableInteraction: false,
+          );
+
+          _capaZonasCreada = true;
+        } else {
+          await map.setGeoJsonSource(
+            _zonasSourceId,
+            geojson,
+          );
+        }
+      } while (_redibujarZonasPendiente && mounted);
+    } catch (e) {
+      debugPrint('Error dibujando zonas rojas: $e');
+    } finally {
+      _dibujandoZonas = false;
+    }
+  }
+
   static const _estadosVisibles = <String>[
     'pendiente',
     'aceptado',
@@ -293,6 +459,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     super.initState();
     _iniciarUbicacionEnTiempoReal();
     _escucharPedidos();
+    _escucharZonasRojas();
 
     // ✅ Importante: Firestore no vuelve a emitir solo porque pasa el tiempo.
     // Esto fuerza a redibujar el mapa cada minuto para recalcular el color violeta.
@@ -1280,6 +1447,7 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
     _timerColores?.cancel();
     _positionSubscription?.cancel();
     _pedidosSubscription?.cancel();
+    _subZonasRojas?.cancel();
     _audioPlayer.dispose();
     super.dispose();
   }
@@ -1314,6 +1482,9 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
                   },
                   onStyleLoadedCallback: () async {
                     _mapStyleLoaded = true;
+                    _capaZonasCreada = false;
+
+                    await _dibujarZonasRojas();
                     await _dibujarMarkersMapLibre();
                   },
                   onMapClick: (_, __) {
@@ -1366,244 +1537,292 @@ class _PedidosPendientesScreenState extends State<PedidosPendientesScreen> {
                       color: Colors.white,
                       child: SafeArea(
                         top: false,
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                          child: Builder(
-                            builder: (_) {
-                              final pedidoSel = _pedidos.firstWhereOrNull(
-                                (doc) => doc.id == _selectedPedidoId,
-                              );
-                              if (pedidoSel == null) {
-                                return const SizedBox.shrink();
-                              }
-
-                              final d = pedidoSel.data();
-                              final estado = (d['estado'] ?? '').toString();
-                              final idCadete = (d['idCadete'] ?? '').toString();
-                              final telefono =
-                                  (d['telefonoCliente'] ?? '').toString();
-                              final telefonoLocal = (_selectedTelefonoLocal ??
-                                      _telefonosLocales[
-                                          _selectedLocalId ?? ''] ??
-                                      '')
-                                  .toString();
-
-                              final esMio = idCadete == (cadete?.uid ?? '');
-                              final puedeEntregar =
-                                  _puedeEntregar(d, cadete?.uid);
-                              final esDemorado20Min =
-                                  _pedidoPendienteDemorado20Min(d);
-
-                              final mostrarIrAlLocal =
-                                  esMio && estado == 'aceptado';
-
-                              final mostrarComenzar = esMio &&
-                                  (estado == 'entregado_al_cadete' ||
-                                      estado == 'entregado' ||
-                                      estado == 'listo');
-
-                              Widget buildCallBtn() {
-                                if (!esMio || telefono.isEmpty) {
-                                  return const SizedBox.shrink();
-                                }
-
-                                final telFmt =
-                                    telefono.replaceAll(RegExp(r'\D'), '');
-                                final uri = Uri.parse('tel:$telFmt');
-
-                                return SizedBox(
-                                  height: 44,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () async {
-                                      await launchUrl(
-                                        uri,
-                                        mode: LaunchMode.externalApplication,
-                                      );
-                                    },
-                                    icon: const Icon(Icons.phone,
-                                        color: Colors.blue),
-                                    label: const Text('Llamar al cliente'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blueAccent,
-                                      foregroundColor: Colors.white,
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              Widget buildCallLocalBtn() {
-                                if (!esMio || telefonoLocal.trim().isEmpty) {
-                                  return const SizedBox.shrink();
-                                }
-
-                                return SizedBox(
-                                  height: 44,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () async {
-                                      await _llamarTelefono(telefonoLocal);
-                                    },
-                                    icon: const Icon(Icons.store),
-                                    label: const Text('Llamar al local'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                      foregroundColor: Colors.white,
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              // ✅ MOSTRAR PRECIO GUARDADO
-                              Widget buildPagoCadete() {
-                                final pagoGuardado = _toInt(d['montoCadete']);
-                                if (pagoGuardado != null && pagoGuardado > 0) {
-                                  return Text(
-                                    'Pago al cadete: \$${pagoGuardado.toString()}',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w700),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxHeight: MediaQuery.sizeOf(context).height * 0.65,
+                          ),
+                          child: SingleChildScrollView(
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                              child: Builder(
+                                builder: (_) {
+                                  final pedidoSel = _pedidos.firstWhereOrNull(
+                                    (doc) => doc.id == _selectedPedidoId,
                                   );
-                                }
-                                return const Text(
-                                  'Pago al cadete: (sin monto guardado)',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                );
-                              }
+                                  if (pedidoSel == null) {
+                                    return const SizedBox.shrink();
+                                  }
 
-                              return Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Cliente: ${_selectedCliente ?? ''}'),
-                                  Text('Local: ${_selectedNombreLocal ?? ''}'),
-                                  if ((_selectedDireccionLocal ?? '')
-                                      .isNotEmpty)
-                                    Text('Dirección: $_selectedDireccionLocal'),
-                                  if (estado == 'pendiente' && esDemorado20Min)
-                                    const Padding(
-                                      padding:
-                                          EdgeInsets.only(top: 4, bottom: 4),
-                                      child: Text(
-                                        '🟣 Pedido con más de 20 minutos - Prioridad alta',
-                                        style: TextStyle(
-                                          color: Colors.purple,
-                                          fontWeight: FontWeight.bold,
+                                  final d = pedidoSel.data();
+                                  final estado = (d['estado'] ?? '').toString();
+                                  final idCadete =
+                                      (d['idCadete'] ?? '').toString();
+                                  final telefono =
+                                      (d['telefonoCliente'] ?? '').toString();
+                                  final telefonoLocal =
+                                      (_selectedTelefonoLocal ??
+                                              _telefonosLocales[
+                                                  _selectedLocalId ?? ''] ??
+                                              '')
+                                          .toString();
+
+                                  final esMio = idCadete == (cadete?.uid ?? '');
+                                  final puedeEntregar =
+                                      _puedeEntregar(d, cadete?.uid);
+                                  final esDemorado20Min =
+                                      _pedidoPendienteDemorado20Min(d);
+
+                                  final mostrarIrAlLocal =
+                                      esMio && estado == 'aceptado';
+
+                                  final mostrarComenzar = esMio &&
+                                      (estado == 'entregado_al_cadete' ||
+                                          estado == 'entregado' ||
+                                          estado == 'listo');
+
+                                  Widget buildCallBtn() {
+                                    if (!esMio || telefono.isEmpty) {
+                                      return const SizedBox.shrink();
+                                    }
+
+                                    final telFmt =
+                                        telefono.replaceAll(RegExp(r'\D'), '');
+                                    final uri = Uri.parse('tel:$telFmt');
+
+                                    return SizedBox(
+                                      height: 44,
+                                      child: ElevatedButton.icon(
+                                        onPressed: () async {
+                                          await launchUrl(
+                                            uri,
+                                            mode:
+                                                LaunchMode.externalApplication,
+                                          );
+                                        },
+                                        icon: const Icon(Icons.phone,
+                                            color: Colors.blue),
+                                        label: const Text('Llamar al cliente'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.blueAccent,
+                                          foregroundColor: Colors.white,
                                         ),
                                       ),
-                                    ),
-                                  const SizedBox(height: 6),
-                                  _pagoChipParaCadete(context, d),
-                                  const SizedBox(height: 6),
-                                  buildPagoCadete(),
-                                  const SizedBox(height: 10),
-                                  if (estado == 'pendiente' &&
-                                      idCadete.isEmpty) ...[
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        SizedBox(
-                                          height: 44,
-                                          child: ElevatedButton.icon(
-                                            onPressed: _aceptarPedido,
-                                            icon: const Icon(Icons.check),
-                                            label: const Text('Aceptar'),
+                                    );
+                                  }
+
+                                  Widget buildCallLocalBtn() {
+                                    if (!esMio ||
+                                        telefonoLocal.trim().isEmpty) {
+                                      return const SizedBox.shrink();
+                                    }
+
+                                    return SizedBox(
+                                      height: 44,
+                                      child: ElevatedButton.icon(
+                                        onPressed: () async {
+                                          await _llamarTelefono(telefonoLocal);
+                                        },
+                                        icon: const Icon(Icons.store),
+                                        label: const Text('Llamar al local'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.red,
+                                          foregroundColor: Colors.white,
+                                        ),
+                                      ),
+                                    );
+                                  }
+
+                                  // ✅ MOSTRAR PRECIO GUARDADO
+                                  Widget buildPagoCadete() {
+                                    final pagoGuardado =
+                                        _toInt(d['montoCadete']);
+                                    if (pagoGuardado != null &&
+                                        pagoGuardado > 0) {
+                                      return Text(
+                                        'Pago al cadete: \$${pagoGuardado.toString()}',
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w700),
+                                      );
+                                    }
+                                    return const Text(
+                                      'Pago al cadete: (sin monto guardado)',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w700),
+                                    );
+                                  }
+
+                                  return Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      if (_selectedDestino != null &&
+                                          _destinoEnZonaRoja(
+                                              _selectedDestino!)) ...[
+                                        Container(
+                                          width: double.infinity,
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red.shade50,
+                                            border:
+                                                Border.all(color: Colors.red),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                          ),
+                                          child: const Text(
+                                            '⚠️ ZONA ROJA\n'
+                                            'El destino de este pedido está dentro de una zona de precaución.\n'
+                                            'Consultá con el local si es un cliente habitual y verificá el método de pago antes de realizar la entrega.',
+                                            style: TextStyle(
+                                              color: Colors.red,
+                                              fontWeight: FontWeight.bold,
+                                            ),
                                           ),
                                         ),
-                                        SizedBox(
-                                          height: 44,
-                                          child: OutlinedButton.icon(
-                                            onPressed: () {
-                                              setState(() =>
-                                                  _selectedPedidoId = null);
-                                            },
-                                            icon: const Icon(Icons.close),
-                                            label: const Text('Cancelar'),
+                                        const SizedBox(height: 10),
+                                      ],
+                                      Text(
+                                          'Cliente: ${_selectedCliente ?? ''}'),
+                                      Text(
+                                          'Local: ${_selectedNombreLocal ?? ''}'),
+                                      if ((_selectedDireccionLocal ?? '')
+                                          .isNotEmpty)
+                                        Text(
+                                            'Dirección: $_selectedDireccionLocal'),
+                                      if (estado == 'pendiente' &&
+                                          esDemorado20Min)
+                                        const Padding(
+                                          padding: EdgeInsets.only(
+                                              top: 4, bottom: 4),
+                                          child: Text(
+                                            '🟣 Pedido con más de 20 minutos - Prioridad alta',
+                                            style: TextStyle(
+                                              color: Colors.purple,
+                                              fontWeight: FontWeight.bold,
+                                            ),
                                           ),
+                                        ),
+                                      const SizedBox(height: 6),
+                                      _pagoChipParaCadete(context, d),
+                                      const SizedBox(height: 6),
+                                      buildPagoCadete(),
+                                      const SizedBox(height: 10),
+                                      if (estado == 'pendiente' &&
+                                          idCadete.isEmpty) ...[
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: [
+                                            SizedBox(
+                                              height: 44,
+                                              child: ElevatedButton.icon(
+                                                onPressed: _aceptarPedido,
+                                                icon: const Icon(Icons.check),
+                                                label: const Text('Aceptar'),
+                                              ),
+                                            ),
+                                            SizedBox(
+                                              height: 44,
+                                              child: OutlinedButton.icon(
+                                                onPressed: () {
+                                                  setState(() =>
+                                                      _selectedPedidoId = null);
+                                                },
+                                                icon: const Icon(Icons.close),
+                                                label: const Text('Cancelar'),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ] else ...[
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: [
+                                            if (mostrarIrAlLocal &&
+                                                _selectedLocalId != null)
+                                              SizedBox(
+                                                height: 44,
+                                                child: ElevatedButton.icon(
+                                                  onPressed: () {
+                                                    _comenzarRecorridoAlLocal(
+                                                      _selectedLocalId!,
+                                                    );
+                                                  },
+                                                  icon: const Icon(Icons.store),
+                                                  label:
+                                                      const Text('Ir al local'),
+                                                ),
+                                              ),
+                                            if (puedeEntregar)
+                                              SizedBox(
+                                                height: 44,
+                                                child: ElevatedButton.icon(
+                                                  onPressed: _entregando
+                                                      ? null
+                                                      : () {
+                                                          _entregarPedido(
+                                                            _selectedPedidoId!,
+                                                            _selectedLocalId!,
+                                                            _selectedDestino!,
+                                                          );
+                                                        },
+                                                  icon: const Icon(
+                                                      Icons.done_all),
+                                                  label: Text(_entregando
+                                                      ? 'Entregando...'
+                                                      : 'Entregar'),
+                                                ),
+                                              ),
+                                            if (mostrarComenzar)
+                                              SizedBox(
+                                                height: 44,
+                                                child: ElevatedButton.icon(
+                                                  onPressed: () {
+                                                    _comenzarRecorridoGoogleMaps(
+                                                      _selectedDestino!,
+                                                    );
+                                                  },
+                                                  icon: const Icon(
+                                                      Icons.navigation),
+                                                  label: const Text('Comenzar'),
+                                                ),
+                                              ),
+                                            buildCallBtn(),
+                                            buildCallLocalBtn(),
+                                            if (esMio && !puedeEntregar)
+                                              const Padding(
+                                                padding: EdgeInsets.only(
+                                                    top: 2, bottom: 2),
+                                                child: Text(
+                                                  'Esperando que el local te entregue el pedido',
+                                                  style: TextStyle(
+                                                      fontStyle:
+                                                          FontStyle.italic),
+                                                ),
+                                              ),
+                                            SizedBox(
+                                              height: 44,
+                                              child: OutlinedButton.icon(
+                                                onPressed: () {
+                                                  setState(() =>
+                                                      _selectedPedidoId = null);
+                                                },
+                                                icon: const Icon(Icons.close),
+                                                label: Text(puedeEntregar
+                                                    ? 'Cancelar'
+                                                    : 'Cerrar'),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
-                                    ),
-                                  ] else ...[
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        if (mostrarIrAlLocal &&
-                                            _selectedLocalId != null)
-                                          SizedBox(
-                                            height: 44,
-                                            child: ElevatedButton.icon(
-                                              onPressed: () {
-                                                _comenzarRecorridoAlLocal(
-                                                  _selectedLocalId!,
-                                                );
-                                              },
-                                              icon: const Icon(Icons.store),
-                                              label: const Text('Ir al local'),
-                                            ),
-                                          ),
-                                        if (puedeEntregar)
-                                          SizedBox(
-                                            height: 44,
-                                            child: ElevatedButton.icon(
-                                              onPressed: _entregando
-                                                  ? null
-                                                  : () {
-                                                      _entregarPedido(
-                                                        _selectedPedidoId!,
-                                                        _selectedLocalId!,
-                                                        _selectedDestino!,
-                                                      );
-                                                    },
-                                              icon: const Icon(Icons.done_all),
-                                              label: Text(_entregando
-                                                  ? 'Entregando...'
-                                                  : 'Entregar'),
-                                            ),
-                                          ),
-                                        if (mostrarComenzar)
-                                          SizedBox(
-                                            height: 44,
-                                            child: ElevatedButton.icon(
-                                              onPressed: () {
-                                                _comenzarRecorridoGoogleMaps(
-                                                  _selectedDestino!,
-                                                );
-                                              },
-                                              icon:
-                                                  const Icon(Icons.navigation),
-                                              label: const Text('Comenzar'),
-                                            ),
-                                          ),
-                                        buildCallBtn(),
-                                        buildCallLocalBtn(),
-                                        if (esMio && !puedeEntregar)
-                                          const Padding(
-                                            padding: EdgeInsets.only(
-                                                top: 2, bottom: 2),
-                                            child: Text(
-                                              'Esperando que el local te entregue el pedido',
-                                              style: TextStyle(
-                                                  fontStyle: FontStyle.italic),
-                                            ),
-                                          ),
-                                        SizedBox(
-                                          height: 44,
-                                          child: OutlinedButton.icon(
-                                            onPressed: () {
-                                              setState(() =>
-                                                  _selectedPedidoId = null);
-                                            },
-                                            icon: const Icon(Icons.close),
-                                            label: Text(puedeEntregar
-                                                ? 'Cancelar'
-                                                : 'Cerrar'),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ],
-                              );
-                            },
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
                           ),
                         ),
                       ),

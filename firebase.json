@@ -20,8 +20,21 @@
   },
   "functions": [
     {
-      "source": "functions",
-      "codebase": "default",
+  "codebase": "default",
+  "runtime": "nodejs22",
+  "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "source": "functions"
+    },
+    {
+      "source": "yendo-prepago",
+      "codebase": "yendo-prepago",
+      "disallowLegacyRuntimeConfig": true,
       "ignore": [
         "node_modules",
         ".git",

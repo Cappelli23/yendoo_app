@@ -1,4 +1,5 @@
 ﻿// lib/screens/local/generar_pedido_screen.dart
+import 'package:cloud_functions/cloud_functions.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -38,9 +39,20 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
 
   String? _clientOrderId;
   bool _guardando = false;
+  Stream<DocumentSnapshot<Map<String, dynamic>>>? _saldoStream;
 
   final List<maplibre.Circle> _circles = [];
   final List<maplibre.Symbol> _symbols = [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subZonasRojas;
+
+  List<List<maplibre.LatLng>> _zonasRojas = [];
+
+  static const String _zonasSourceId = 'yendo-zonas-rojas';
+  static const String _zonasLayerId = 'yendo-zonas-rojas-visual';
+
+  bool _capaZonasCreada = false;
+  bool _dibujandoZonas = false;
+  bool _redibujarZonasPendiente = false;
 
   static const String _mapStyle = '''
 {
@@ -197,8 +209,17 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
   @override
   void initState() {
     super.initState();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    if (uid != null) {
+      _saldoStream = FirebaseFirestore.instance
+          .collection('usuarios')
+          .doc(uid)
+          .snapshots();
+    }
     _nuevoOrderId();
     _cargarLocal().then((_) => _escucharPedidos());
+    _escucharZonasRojas();
   }
 
   @override
@@ -207,7 +228,163 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
     _telefonoCtl.dispose();
     _linkCtl.dispose();
     _sub?.cancel();
+    _subZonasRojas?.cancel();
     super.dispose();
+  }
+
+  List<maplibre.LatLng> _leerPuntosZona(dynamic raw) {
+    if (raw is! List) return [];
+
+    final puntos = <maplibre.LatLng>[];
+
+    for (final item in raw) {
+      if (item is! Map) return [];
+
+      final lat = item['lat'];
+      final lng = item['lng'];
+
+      if (lat is! num || lng is! num) return [];
+
+      puntos.add(
+        maplibre.LatLng(lat.toDouble(), lng.toDouble()),
+      );
+    }
+
+    return puntos;
+  }
+
+  bool _destinoEnZonaRoja(latlng2.LatLng destino) {
+    for (final zona in _zonasRojas) {
+      if (zona.length < 3) continue;
+
+      bool dentro = false;
+      int j = zona.length - 1;
+
+      for (int i = 0; i < zona.length; i++) {
+        final xi = zona[i].longitude;
+        final yi = zona[i].latitude;
+        final xj = zona[j].longitude;
+        final yj = zona[j].latitude;
+
+        if ((yi > destino.latitude) != (yj > destino.latitude) &&
+            destino.longitude <
+                (xj - xi) * (destino.latitude - yi) / (yj - yi) + xi) {
+          dentro = !dentro;
+        }
+
+        j = i;
+      }
+
+      if (dentro) return true;
+    }
+
+    return false;
+  }
+
+  void _escucharZonasRojas() {
+    _subZonasRojas = FirebaseFirestore.instance
+        .collection('zonasRojas')
+        .snapshots()
+        .listen((snapshot) {
+      if (!mounted) return;
+
+      final nuevasZonas = <List<maplibre.LatLng>>[];
+
+      for (final doc in snapshot.docs) {
+        final datos = doc.data();
+
+        if (datos['activo'] != true) continue;
+
+        final puntos = _leerPuntosZona(datos['puntos']);
+
+        if (puntos.length >= 3) {
+          nuevasZonas.add(puntos);
+        }
+      }
+
+      setState(() {
+        _zonasRojas = nuevasZonas;
+      });
+
+      unawaited(_dibujarZonasRojas());
+    }, onError: (Object error) {
+      debugPrint('Error leyendo zonas rojas: $error');
+    });
+  }
+
+  Future<void> _dibujarZonasRojas() async {
+    final map = _map;
+    if (!_styleReady || map == null) return;
+
+    if (_dibujandoZonas) {
+      _redibujarZonasPendiente = true;
+      return;
+    }
+
+    _dibujandoZonas = true;
+
+    try {
+      do {
+        _redibujarZonasPendiente = false;
+
+        final features = <Map<String, dynamic>>[];
+
+        for (final puntos in _zonasRojas) {
+          if (puntos.length < 3) continue;
+
+          final coordenadas =
+              puntos.map((p) => [p.longitude, p.latitude]).toList();
+
+          coordenadas.add([
+            puntos.first.longitude,
+            puntos.first.latitude,
+          ]);
+
+          features.add({
+            'type': 'Feature',
+            'properties': <String, dynamic>{},
+            'geometry': {
+              'type': 'Polygon',
+              'coordinates': [coordenadas],
+            },
+          });
+        }
+
+        final geojson = <String, dynamic>{
+          'type': 'FeatureCollection',
+          'features': features,
+        };
+
+        if (!_capaZonasCreada) {
+          await map.addGeoJsonSource(
+            _zonasSourceId,
+            geojson,
+          );
+
+          await map.addFillLayer(
+            _zonasSourceId,
+            _zonasLayerId,
+            const maplibre.FillLayerProperties(
+              fillColor: '#E53935',
+              fillOpacity: 0.30,
+              fillOutlineColor: '#B71C1C',
+            ),
+            enableInteraction: false,
+          );
+
+          _capaZonasCreada = true;
+        } else {
+          await map.setGeoJsonSource(
+            _zonasSourceId,
+            geojson,
+          );
+        }
+      } while (_redibujarZonasPendiente && mounted);
+    } catch (e) {
+      debugPrint('Error dibujando zonas rojas: $e');
+    } finally {
+      _dibujandoZonas = false;
+    }
   }
 
   void _nuevoOrderId() {
@@ -345,54 +522,27 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
         return;
       }
 
-      const ganAdmin = 15;
-      final int montoCad = _montoTotal! - ganAdmin;
-      final double kmGuardado = distanciaMostrable;
-
       final String orderId = _clientOrderId ??
           FirebaseFirestore.instance.collection('pedidosEnCurso').doc().id;
 
       _clientOrderId = orderId;
 
-      final db = FirebaseFirestore.instance;
-      final ref = db.collection('pedidosEnCurso').doc(orderId);
+      final callable = FirebaseFunctions.instanceFor(
+        region: 'southamerica-east1',
+      ).httpsCallable('crearPedidoYendo');
 
-      bool creado = false;
-
-      await db.runTransaction((txn) async {
-        final snap = await txn.get(ref);
-
-        if (snap.exists) {
-          creado = false;
-          return;
-        }
-
-        creado = true;
-
-        txn.set(ref, {
-          'clientOrderId': orderId,
-          'idLocal': uid,
-          'cliente': cliente,
-          'telefonoCliente': telefono,
-          'estado': 'pendiente',
-          'tipo': 'normal',
-          'fechaCreado': FieldValue.serverTimestamp(),
-          'ubicacionOrigen': {
-            'lat': _localPos!.latitude,
-            'lng': _localPos!.longitude,
-          },
-          'ubicacionDestino': {
-            'lat': _destinoTmp!.latitude,
-            'lng': _destinoTmp!.longitude,
-          },
-          'distanciaKmMostrable': kmGuardado,
-          'distanciaKmReal': kmGuardado,
-          'distancia_km': kmGuardado,
-          'montoCadete': montoCad,
-          'montoGananciaAdmin': ganAdmin,
-          'montoTotal': _montoTotal,
-        });
+      final resultado = await callable.call({
+        'orderId': orderId,
+        'tipo': 'normal',
+        'cliente': cliente,
+        'telefonoCliente': telefono,
+        'ubicacionDestino': {
+          'lat': _destinoTmp!.latitude,
+          'lng': _destinoTmp!.longitude,
+        },
       });
+
+      final bool creado = resultado.data['creado'] == true;
 
       if (!mounted) return;
 
@@ -412,6 +562,30 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
       );
 
       _resetNuevoPedido();
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.code == 'failed-precondition'
+                ? 'Saldo insuficiente'
+                : 'No se pudo generar el pedido',
+          ),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo generar el pedido'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _guardando = false);
     }
@@ -576,6 +750,9 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
 
   Future<void> _onStyleLoaded() async {
     _styleReady = true;
+    _capaZonasCreada = false;
+
+    await _dibujarZonasRojas();
     await _refreshMapMarkers();
   }
 
@@ -729,6 +906,7 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
             myLocationTrackingMode: maplibre.MyLocationTrackingMode.none,
             onMapCreated: _onMapCreated,
             onStyleLoadedCallback: _onStyleLoaded,
+            onMapClick: _onMapLongClick,
             onMapLongClick: _onMapLongClick,
           ),
           Positioned(
@@ -822,6 +1000,29 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (_destinoTmp != null &&
+                        _destinoEnZonaRoja(_destinoTmp!)) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          border: Border.all(color: Colors.red),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Text(
+                          '⚠️ ZONA ROJA\n'
+                          'Esta dirección está dentro de una zona de precaución.\n'
+                          'Si no es un cliente habitual, recomendamos aceptar únicamente pagos por transferencia.\n'
+                          'Podés continuar con el pedido normalmente.',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     TextField(
                       controller: _clienteCtl,
                       decoration: const InputDecoration(
@@ -848,6 +1049,39 @@ class _GenerarPedidoScreenState extends State<GenerarPedidoScreen> {
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
+                    StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: _saldoStream,
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) {
+                          return const Text('Consultando saldo...');
+                        }
+
+                        final data = snapshot.data?.data();
+                        final saldo = data?['saldo'];
+                        final disponible = saldo is num ? saldo : 0;
+
+                        final insuficiente =
+                            _montoTotal != null && disponible < _montoTotal!;
+
+                        return Column(
+                          children: [
+                            Text(
+                              'Saldo disponible: \$$disponible',
+                              style: TextStyle(
+                                color: insuficiente ? Colors.red : Colors.green,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            if (insuficiente)
+                              const Text(
+                                'Saldo insuficiente para generar el pedido',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
                     if (_distKm != null &&
                         _distKm! > 8.5 &&
                         _montoTotal == null)

@@ -26,7 +26,7 @@ android {
         targetSdk = 36
 
         // ⬆️ Subí la versión para la actualización
-        versionCode = 123                           // ← mayor que 102
+        versionCode = 124                           // ← mayor que 102
         versionName = "1.0.11"
 
         multiDexEnabled = true
@@ -62,9 +62,11 @@ android {
         isCoreLibraryDesugaringEnabled = true        // ← clave para evitar el error de AAR metadata
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
+}
 }
 
 flutter {
